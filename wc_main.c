@@ -88,7 +88,7 @@ int main(int argc, char **argv)
     }
 
     // initialize message logging
-    logmsg_init(debug_mode == 0 ? "/var/opt/wc/wc_server.log" : "stdout");
+    logmsg_init(debug_mode == 0 ? "wc_server.log" : "stdout");
 
     // get the wc_macaddr, this is used to identify this webcam in the wc_announce dgram
     ret = getmacaddr(wc_macaddr);

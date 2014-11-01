@@ -1,0 +1,4 @@
+#!/bin/bash
+
+cd ~/proj_cam
+wc_server & < /dev/null > /dev/null 2>&1 &

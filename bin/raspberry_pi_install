@@ -1,0 +1,31 @@
+#!/bin/bash
+
+host=$1
+if [ "$host" == "" ] 
+then
+  echo hostname expected
+  exit
+fi
+
+echo
+echo SEND TAR FILE TO $host
+scp -p \
+  wc_main.c wc_nettest.c wc_login.c wc_webcam.c p2p1.c util.c jpeg_decode.c wc.h Makefile \
+  pi@$host:proj_cam
+
+echo
+echo KILLALL WC_SERVER 
+ssh pi@$host killall -SIGKILL wc_server 
+
+echo 
+echo BUILD 
+ssh pi@$host "cd proj_cam; make wc_server"
+
+echo
+echo "START WC_SERVER"
+ssh pi@$host  "cd proj_cam; ./wc_server < /dev/null > /dev/null 2>&1 &"
+
+echo
+echo "QUERY WC_SERVER"
+ssh pi@$host  "ps -f -C wc_server"
+

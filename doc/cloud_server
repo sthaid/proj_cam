@@ -1,0 +1,84 @@
+PROCEDURE
+---------
+
+- install linux system on computer that can be accessed from the internet
+
+- setup login account
+  - adduser haid, passwd haid
+  - send over .ssh dir, and verify login without password
+  - mkdir proj_cam bin proj_cam/user
+  - copy files to bin dir
+
+- setup files in /etc
+  - follow instructions below for /etc/init.d/cloud_server
+
+- setup sudo  (visudo)
+  - add yourself to sudo, and
+  - comment out line containing 'requiretty'
+
+- setup additional development software
+  - yum install readline-devel
+  - others ??
+
+- build and install cloud_server 
+  - bin/cloud_server_install
+
+
+FILE /etc/init.d/cloud_server
+-----------------------------
+
+#!/bin/sh
+
+# chkconfig: 3 90 10
+
+# install instructions ...
+# 
+# create this file in /etc/init.d/cloud_server
+# chkconfig --add cloud_server
+# service cloud_server start
+
+dir=/home/haid/proj_cam
+prog=cloud_server
+retval=0
+
+start() {
+        if ps -f -C $prog | grep $dir >/dev/null 2>&1; then
+          echo Already running
+        else
+          echo "Starting $prog"
+          cd $dir
+          $dir/$prog </dev/null >/dev/null 2>&1 &
+        fi
+}
+
+stop() {
+        echo  "Stopping $prog"
+        killall $dir/$prog
+}
+
+case "$1" in
+        start)
+                start
+                ;;
+        stop)
+                stop
+                ;;
+        restart)
+                stop
+                start
+                ;;
+        status)
+                if ps -f -C $prog | grep $dir >/dev/null 2>&1; then
+                  echo Running
+                else
+                  echo Stopped
+                fi
+                ;;
+        *)
+                echo "Usage: $0 {start|stop|status}"
+                retval=1
+                ;;
+esac
+exit $retval
+
+

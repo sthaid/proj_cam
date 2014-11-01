@@ -1,0 +1,66 @@
+PROCEDURE
+---------
+- assemble the raspberry pi into it's case
+
+- connect 
+  - wireless keyboard & mouse
+  - display
+  - wireless network
+  - flash card
+  - power
+
+- raspi-config will autostart, select
+  1 : expand filesystem
+  3 enable boot to desktop
+  4 tz
+  Finish
+
+- next it reboots and loads desktop, configure
+  - terminal monospace 14
+  - wifi : scan, select network, enter key, connect
+
+- setup pi login
+  - update router to make ip addr static, and add ip addr to development system's /etc/hosts
+  - send over .ssh dir, and verify login without password
+  - update .profile
+      PATH=".:$PATH"
+  - update .bashrc
+      alias ls='ls -l'
+  - mkdir proj_cam bin
+  - copy files to bin dir
+
+- setup files in /etc
+  - rc.local: add the following
+      # Start wc_server
+      if [ -x /home/pi/proj_cam/wc_server ]
+      then
+        su pi -c "cd /home/pi/proj_cam; ./wc_server </dev/null >/dev/null 2>&1 &"
+      fi
+
+- setup additional development software
+  - sudo apt-get install libjpeg8-dev
+
+- build and install wc_server 
+  - bin/install_raspberry_pi
+
+- disconnect wireless keyboard and mouse and connect camera, and reboot
+
+
+NOTES
+-----
+
+login pi, password raspberry
+
+raspi-config can be rerun later
+
+downloading new flash image and copy on to micro sd card
+- get Raspbian OS image from raspberrypi.org/downloads
+- insert SD Card into computer
+- umount all filesystems mounted on from the SD card, for example
+    umount /dev/sdb5
+    umount /dev/sdb6
+- dd bs=4M if=xxx.img of=/dev/sdb
+- monitor progress of dd by sending it SIGUSR1
+    pkill -USR1 -n -x dd
+- when done 'sync' and remove SD card
+

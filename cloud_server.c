@@ -26,7 +26,7 @@
 #define IS_ROOT(u) (strcmp((u)->user_name, "root") == 0)
 
 // location of user account files
-#define USER_DIR "/var/opt/wc/user"
+#define USER_DIR "user"
 
 //
 // typedefs
@@ -140,7 +140,7 @@ int main(int argc, char ** argv)
     }
 
     // initialize message logging
-    logmsg_init(debug_mode == 0 ? "/var/opt/wc/cloud_server.log" : "stdout");
+    logmsg_init(debug_mode == 0 ? "cloud_server.log" : "stdout");
 
     // call subsystem initialization routines
     NOTICE("initializing\n");

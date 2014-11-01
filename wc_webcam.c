@@ -49,10 +49,10 @@
 
 // cam settings
 #define MAX_CAM_SETTINGS_INFO   (sizeof(cam_settings_info) / sizeof(cam_settings_info[0]))
-#define CAM_SETTINGS_FILE_NAME  "/var/opt/wc/cam_settings.dat"
+#define CAM_SETTINGS_FILE_NAME  "cam_settings.dat"
 
 // record / playback
-#define RP_FILE_NAME              "/var/opt/wc/rp.dat"
+#define RP_FILE_NAME              "rp.dat"
 #define RP_FILE_MAGIC             0x1122334455667788LL
 #define RP_FILE_FRAME_MAGIC       0x123455aa
 #define RP_FILE_HDR_0_OFFSET      0

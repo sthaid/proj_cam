@@ -41,16 +41,6 @@ nettest_to_wc: $(NETTEST_TO_WC_OBJS)
 	$(CC) -pthread -lrt -o $@ $(NETTEST_TO_WC_OBJS)
 
 #
-# install rules
-#
-
-install_wc_server:
-	cp wc_server /usr/local/bin
-
-install_cloud_server:
-	cp cloud_server /usr/local/bin
-
-#
 # clean rule
 #
 

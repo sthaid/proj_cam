@@ -1,0 +1,3 @@
+#!/bin/bash
+
+tail -n 50 -f ~haid/proj_cam/cloud_server.log
