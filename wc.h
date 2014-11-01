@@ -42,8 +42,7 @@
 
 #define CLOUD_SERVER_HOSTNAME        "sthaid-rs.dyndns.org"
 
-#define CLOUD_SERVER_PORT_9000        9000
-#define CLOUD_SERVER_PORT_80          80
+#define CLOUD_SERVER_PORT             80
 #define CLOUD_SERVER_DGRAM_PORT       9001
 
 #define CLOUD_SERVER_MAX_NETTEST_BUFF 0x100000 
@@ -55,7 +54,7 @@
 #define MAX_USER_NAME                 32
 #define MAX_PASSWORD                  32
 
-int connect_to_cloud_server(char * user_name, char * password, char * service, int port);
+int connect_to_cloud_server(char * user_name, char * password, char * service);
 
 // -----------------  PEER TO PEER COMMUNICATION  ------------------------------------
 

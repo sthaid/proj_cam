@@ -2,7 +2,7 @@
 
 // -----------------  CONNECT_TO_CLOUD_SERVER   --------------------------
 
-int connect_to_cloud_server(char * user_name, char * password, char * service, int port)
+int connect_to_cloud_server(char * user_name, char * password, char * service)
 {
     struct sockaddr_in addr;
     char               login[3*32];
@@ -11,7 +11,7 @@ int connect_to_cloud_server(char * user_name, char * password, char * service, i
     char               s[100];
 
     // get address of CLOUD_SERVER
-    ret =  getsockaddr(CLOUD_SERVER_HOSTNAME, port, SOCK_STREAM, 0, &addr); 
+    ret =  getsockaddr(CLOUD_SERVER_HOSTNAME, CLOUD_SERVER_PORT, SOCK_STREAM, 0, &addr); 
     if (ret < 0) {
         ERROR("failed to get address of %s\n", CLOUD_SERVER_HOSTNAME);
         return -1;

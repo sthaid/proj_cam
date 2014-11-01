@@ -51,12 +51,12 @@ int main(int argc, char **argv)
     // parse options
     p2p = &p2p1;
     while (true) {
-        opt_char = getopt(argc, argv, "wu:p:");
+        opt_char = getopt(argc, argv, "Pu:p:");
         if (opt_char == -1) {
             break;
         }
         switch (opt_char) {
-        case 'w':
+        case 'P':
             p2p = &p2p2;
             break;
         case 'u':
@@ -72,8 +72,8 @@ int main(int argc, char **argv)
 
     // verify args
     if ((user_name == NULL) || (password == NULL) || (argc-optind != 1)) {
-        NOTICE("usage: wc_nettest_webcam <wc_name>\n");
-        NOTICE("  -w: route network traffic to webcam via cloud server, using port 80\n");
+        NOTICE("usage: nettest_to_wc <wc_name>\n");
+        NOTICE("  -P: use http proxy server\n");
         NOTICE("  -u <user_name>: override WC_USER_NAME environment value\n");
         NOTICE("  -p <password>: override WC_PASSWORD environment value\n");
         return 1;

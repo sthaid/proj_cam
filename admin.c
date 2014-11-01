@@ -26,7 +26,6 @@ int main(int argc, char **argv)
     int             sfd;
     struct rlimit   rl;
     char            opt_char;
-    int             port = CLOUD_SERVER_PORT_9000;
     bool            create_account = false;
 
     // set stdout to unbuffered
@@ -46,16 +45,13 @@ int main(int argc, char **argv)
 
     // parse options
     while (true) {
-        opt_char = getopt(argc, argv, "cwu:p:");
+        opt_char = getopt(argc, argv, "cu:p:");
         if (opt_char == -1) {
             break;
         }
         switch (opt_char) {
         case 'c':
             create_account = true;
-            break;
-        case 'w':
-            port = CLOUD_SERVER_PORT_80;
             break;
         case 'u':
             user_name = optarg;
@@ -72,7 +68,6 @@ int main(int argc, char **argv)
     if ((user_name == NULL) || (password == NULL) || (argc-optind != 0)) {
         NOTICE("usage: wc_admin\n");
         NOTICE("  -c: create account\n");
-        NOTICE("  -w: use port 80\n");
         NOTICE("  -u <user_name>: override WC_USER_NAME environment value\n");
         NOTICE("  -p <password>: override WC_PASSWORD environment value\n");
         return 1;
@@ -81,8 +76,7 @@ int main(int argc, char **argv)
     // connect to CAMSERVER
     sfd = connect_to_cloud_server(user_name, 
                                   password, 
-                                  create_account ? "create" : "login",
-                                  port);
+                                  create_account ? "create" : "login");
     if (sfd == -1) {
         FATAL("unable to connect to server\n");
     }

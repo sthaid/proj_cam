@@ -73,7 +73,7 @@ static int p2p2_connect(char * user_name, char * password, char * wc_name, int s
 
     // connect to cloud_server, with 'wccon' service
     sprintf(service, "wccon %s %d", wc_name, service_id);
-    handle = connect_to_cloud_server(user_name, password, service, CLOUD_SERVER_PORT_80);
+    handle = connect_to_cloud_server(user_name, password, service);
 
     // verify handle is in range
     if (handle < 0 || handle >= MAX_HANDLE) {

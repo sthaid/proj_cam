@@ -368,12 +368,12 @@ int main(int argc, char **argv)
     opt_use_p2p2 = opt_debug = false;
     opt_zoom_str = NULL;
     while (true) {
-        opt_char = getopt(argc, argv, "wdz:u:p:Z");
+        opt_char = getopt(argc, argv, "Pdz:u:p:Z");
         if (opt_char == -1) {
             break;
         }
         switch (opt_char) {
-        case 'w':
+        case 'P':
             opt_use_p2p2 = true;
             break;
        case 'd':
@@ -402,8 +402,8 @@ int main(int argc, char **argv)
         (opt_zoom_str != NULL && (strlen(opt_zoom_str) != 1 || opt_zoom_str[0] < 'A' || opt_zoom_str[0] > 'D')) ||
         (argc-optind > MAX_WEBCAM)) 
     {
-        NOTICE("usage: wc_webcam <user_name> <password> <wc_name> ...\n");
-        NOTICE("  -w: route network traffic to webcam via cloud server, using port 80\n");
+        NOTICE("usage: viewer <user_name> <password> <wc_name> ...\n");
+        NOTICE("  -P: use http proxy server\n");
         NOTICE("  -z <A|B|C|D>: sets zoom webcam\n");
         NOTICE("  -d: enable debug\n");
         NOTICE("  -u <user_name>: override WC_USER_NAME environment value\n");

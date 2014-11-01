@@ -147,9 +147,8 @@ int main(int argc, char ** argv)
     account_init();
     dgram_init();
 
-    // create service_accept_thread for 2 ports
-    pthread_create(&thread, NULL, service_accept_thread, (void*)(long)CLOUD_SERVER_PORT_9000);
-    pthread_create(&thread, NULL, service_accept_thread, (void*)(long)CLOUD_SERVER_PORT_80);
+    // create service_accept_thread
+    pthread_create(&thread, NULL, service_accept_thread, NULL);
 
     // pause forever
     NOTICE("startup complete\n");
@@ -164,7 +163,6 @@ int main(int argc, char ** argv)
 
 void * service_accept_thread(void * cx)
 {
-    int                port = (int)(long)cx;
     int                listen_sockfd;
     int                ret, sockfd=-1, len, i, login_okay;
     socklen_t          addrlen;
@@ -192,7 +190,7 @@ void * service_accept_thread(void * cx)
     bzero(&addr,sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htons(INADDR_ANY);
-    addr.sin_port = htons(port) ;
+    addr.sin_port = htons(CLOUD_SERVER_PORT);
     ret = bind(listen_sockfd, (struct sockaddr *)&addr, sizeof(addr));
     if (ret == -1) {
         FATAL("bind listen_sockfd\n");
@@ -222,7 +220,7 @@ void * service_accept_thread(void * cx)
         // debug print the accepted connection
         DEBUG("accept from %s on port %d\n", 
               sock_addr_to_str(s,sizeof(s),(struct sockaddr*)&addr),
-              port);
+              CLOUD_SERVER_PORT);
 
         // read 96 bytes which contain the user_name,password,service
         len = recv(sockfd, login, sizeof(login), MSG_WAITALL);
