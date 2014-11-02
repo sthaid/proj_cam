@@ -173,6 +173,7 @@ void * service_accept_thread(void * cx)
     char             * password;
     char             * service;
     pthread_t          thread;
+    char               http_connect_req[sizeof(HTTP_CONNECT_REQ)];
 
     // detach because this thread will not be joined
     pthread_detach(pthread_self());
@@ -221,6 +222,25 @@ void * service_accept_thread(void * cx)
         DEBUG("accept from %s on port %d\n", 
               sock_addr_to_str(s,sizeof(s),(struct sockaddr*)&addr),
               CLOUD_SERVER_PORT);
+
+        // read and validate http connect request
+        bzero(http_connect_req, sizeof(http_connect_req));
+        len = recv(sockfd, http_connect_req, sizeof(http_connect_req)-1, MSG_WAITALL);
+        if (len != sizeof(http_connect_req)-1) {
+            ERROR("reading http connect request, %s\n", strerror(errno));
+            continue;
+        }
+        if (strcmp(http_connect_req, HTTP_CONNECT_REQ) != 0) {
+            ERROR("invalid http connect request, '%s'\n", http_connect_req);
+            continue;
+        }
+
+        // send http connect response
+        len = write(sockfd, HTTP_CONNECT_RESP, sizeof(HTTP_CONNECT_RESP)-1);
+        if (len != sizeof(HTTP_CONNECT_RESP)-1) {
+            ERROR("sending http connect response, %s\n", strerror(errno));
+            continue;
+        }
 
         // read 96 bytes which contain the user_name,password,service
         len = recv(sockfd, login, sizeof(login), MSG_WAITALL);

@@ -54,6 +54,9 @@
 #define MAX_USER_NAME                 32
 #define MAX_PASSWORD                  32
 
+#define HTTP_CONNECT_REQ  "CONNECT " CLOUD_SERVER_HOSTNAME ":80 HTTP/1.0\r\n\r\n"
+#define HTTP_CONNECT_RESP "HTTP/1.0 200 OK\r\n\r\n"
+
 int connect_to_cloud_server(char * user_name, char * password, char * service);
 
 // -----------------  PEER TO PEER COMMUNICATION  ------------------------------------

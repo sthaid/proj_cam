@@ -9,6 +9,7 @@ int connect_to_cloud_server(char * user_name, char * password, char * service)
     char               login_err_str[200];
     int                ret, sfd, len, login_response;
     char               s[100];
+    char               http_connect_resp[sizeof(HTTP_CONNECT_RESP)];
 
     // get address of CLOUD_SERVER
     ret =  getsockaddr(CLOUD_SERVER_HOSTNAME, CLOUD_SERVER_PORT, SOCK_STREAM, 0, &addr); 
@@ -30,6 +31,28 @@ int connect_to_cloud_server(char * user_name, char * password, char * service)
     ret = connect(sfd, (struct sockaddr *)&addr, sizeof(addr));
     if (ret == -1) {
         ERROR("connect, %s\n", strerror(errno));
+        close(sfd);
+        return -1;
+    }
+
+    // send http connect string
+    len = write(sfd, HTTP_CONNECT_REQ, sizeof(HTTP_CONNECT_REQ)-1);
+    if (len != sizeof(HTTP_CONNECT_REQ)-1) {
+        ERROR("sending http connect request, %s\n", strerror(errno));
+        close(sfd);
+        return -1;
+    }
+
+    // read and validate http connect response
+    bzero(http_connect_resp, sizeof(http_connect_resp));
+    len = recv(sfd, http_connect_resp, sizeof(http_connect_resp)-1, MSG_WAITALL);
+    if (len != sizeof(http_connect_resp)-1) {
+        ERROR("reading http connect response, %s\n", strerror(errno));
+        close(sfd);
+        return -1;
+    }
+    if (strcmp(http_connect_resp, HTTP_CONNECT_RESP) != 0) {
+        ERROR("invalid http connect response, '%s'\n", http_connect_resp);
         close(sfd);
         return -1;
     }
