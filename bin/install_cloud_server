@@ -4,6 +4,9 @@ user=haid
 host=sthaid-rs.dyndns.org
 
 echo
+echo "----------- INSTALL_CLOUD_SERVER ----------"
+
+echo
 echo SEND TAR FILE TO $user@$host
 scp -p \
   cloud_server.c p2p1.c util.c wc.h Makefile \

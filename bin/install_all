@@ -1,0 +1,4 @@
+#!/bin/bash
+
+bin/install_cloud_server
+bin/install_raspberry_pi wc1
