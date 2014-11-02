@@ -72,8 +72,8 @@ void * wc_svc_shell(void * cx)
         open(slavename, O_RDWR);
 
         // exec bash
-#if 0
-        char * envp[] = { "TERM=xterm", "HOME=/root", (char*)NULL };
+#if 1
+        char * envp[] = { "TERM=xterm", "HOME=/home/pi", (char*)NULL };
         execle("/bin/bash", "-", (char*)NULL, envp);
 #else
         execl("/bin/login", "TERM=xterm", (char*)NULL);
