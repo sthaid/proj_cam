@@ -269,46 +269,91 @@ done:
 // -----------------  LOGGING UTILS  --------------------------------------
 
 FILE * logmsg_fp;
+FILE * logmsg_fp_old;
+size_t logmsg_file_size;
+char   logmsg_file_name[100] = "stderr";
 
-void logmsg_init(char * logmsg_file)
+void logmsg_init(char * file_name)
 {
-    if (strcmp(logmsg_file, "stdout") == 0) {
-        logmsg_fp = stdout;
-    } else {
-        logmsg_fp = fopen(logmsg_file, "ae");   // mode: append, close-on-exec
-        if (logmsg_fp == NULL) {
-            FATAL("failed to create logmsg file %s, %s\n", logmsg_file, strerror(errno));
-        }
-    }
+    struct stat buf;
 
-    setlinebuf(logmsg_fp);
+    strcpy(logmsg_file_name, file_name);
+
+    if (strcmp(logmsg_file_name, "stderr") == 0) {
+        logmsg_fp = NULL;
+    } else {
+        logmsg_fp = fopen(logmsg_file_name, "ae");   // mode: append, close-on-exec
+        if (logmsg_fp == NULL) {
+            FATAL("failed to create logmsg file %s, %s\n", logmsg_file_name, strerror(errno));
+        }
+
+        if (stat(logmsg_file_name, &buf) != 0) {
+            FATAL("failed to stat logmsg file %s, %s\n", logmsg_file_name, strerror(errno));
+        }
+        logmsg_file_size = buf.st_size;
+
+        setlinebuf(logmsg_fp);
+    }
 }
 
 void logmsg(char *lvl, const char *func, char *fmt, ...) 
 {
     va_list ap;
-    char msg[1000];
-    int len;
-    char time_str[MAX_TIME_STR];
+    char    msg[1000];
+    int     len, cnt;
+    char    time_str[MAX_TIME_STR];
 
+    // construct msg
     va_start(ap, fmt);
     vsnprintf(msg, sizeof(msg), fmt, ap);
     va_end(ap);
 
+    // remove terminating newline
     len = strlen(msg);
-    if (msg[len-1] == '\n') {
+    if (len > 0 && msg[len-1] == '\n') {
         msg[len-1] = '\0';
+        len--;
     }
 
-    if (logmsg_fp) {
-        fprintf(logmsg_fp, "%s %s %s: %s\n",
-                time2str(time_str, time(NULL), false),
-                lvl, func, msg);
+    // check if logging to file vs stderr
+    if (logmsg_fp != NULL) {
+        // logging to file
+
+        // print the preamble and msg
+        cnt = fprintf(logmsg_fp, "%s %s %s: %s\n",
+                      time2str(time_str, time(NULL), false),
+                      lvl, func, msg);
+
+        // keep track of file size
+        logmsg_file_size += cnt;
+
+        // if file size greater than max then rename file to file.old, and create new file
+        if (logmsg_file_size > MAX_LOGMSG_FILE_SIZE) {
+            char   dot_old[100];
+            FILE * new_fp;
+
+            if (logmsg_fp_old) {
+                fclose(logmsg_fp_old);
+            }
+            logmsg_fp_old = logmsg_fp;
+
+            sprintf(dot_old, "%s.old", logmsg_file_name);
+            rename(logmsg_file_name, dot_old);
+
+            new_fp = fopen(logmsg_file_name, "we");
+            if (new_fp == NULL) {
+                FATAL("failed to create logmsg file %s, %s\n", logmsg_file_name, strerror(errno));
+            }
+
+            logmsg_fp = new_fp;
+            logmsg_file_size = 0;
+        }
     } else {
+        // logging to stderr
         if (strcmp(lvl,"NOTICE") == 0) {
-            printf("%s\n", msg);
+            fprintf(stderr,"%s\n", msg);
         } else {
-            printf("%s %s: %s\n", lvl, func, msg);
+            fprintf(stderr,"%s %s: %s\n", lvl, func, msg);
         }
     }
 }

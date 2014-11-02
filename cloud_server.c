@@ -140,7 +140,7 @@ int main(int argc, char ** argv)
     }
 
     // initialize message logging
-    logmsg_init(debug_mode == 0 ? "cloud_server.log" : "stdout");
+    logmsg_init(debug_mode == 0 ? "cloud_server.log" : "stderr");
 
     // call subsystem initialization routines
     NOTICE("initializing\n");

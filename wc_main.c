@@ -48,8 +48,8 @@ bool getcl(int * argc, char ** argv);
 //
 
 service_t service_tbl[] = {
-    { SERVICE_NETTEST, NULL,                wc_svc_nettest, "nettest"  },
-    { SERVICE_SHELL,   NULL,                wc_svc_shell,   "shell"    },
+    { SERVICE_NETTEST, NULL,               wc_svc_nettest, "nettest"  },
+    { SERVICE_SHELL,   NULL,               wc_svc_shell,   "shell"    },
     { SERVICE_WEBCAM,  wc_svc_webcam_init, wc_svc_webcam,  "webcam"   },
             };
 
@@ -88,7 +88,7 @@ int main(int argc, char **argv)
     }
 
     // initialize message logging
-    logmsg_init(debug_mode == 0 ? "wc_server.log" : "stdout");
+    logmsg_init(debug_mode == 0 ? "wc_server.log" : "stderr");
 
     // get the wc_macaddr, this is used to identify this webcam in the wc_announce dgram
     ret = getmacaddr(wc_macaddr);
@@ -108,6 +108,7 @@ int main(int argc, char **argv)
             if (ret < 0) {
                 ERROR("service %s failed to initialize, disabling this service\n",
                       service_tbl[i].name);
+                service_tbl[i].disabled = true;
             }
         }
     }

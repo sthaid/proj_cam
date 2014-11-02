@@ -479,6 +479,8 @@ typedef struct {
   #define DEBUG(fmt, args...) 
 #endif
 
+#define MAX_LOGMSG_FILE_SIZE 0x100000
+
 #define TIMESPEC_TO_US(ts) ((uint64_t)(ts)->tv_sec * 1000000 + (ts)->tv_nsec / 1000)
 #define TIMEVAL_TO_US(tv)  ((uint64_t)(tv)->tv_sec * 1000000 + (tv)->tv_usec)
 
