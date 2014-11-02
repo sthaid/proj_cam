@@ -392,11 +392,10 @@ int p2p1_accept(char * wc_macaddr, int * service, char * user_name)
 
     while (true) {
         // every 10 minutes try to get an updated address for CLOUD_SERVER_HOSTNAME
-        if ((MILLISEC_TIMER - time_last_getsockaddr_ms > 10*60000) &&
-            (getsockaddr(CLOUD_SERVER_HOSTNAME, CLOUD_SERVER_DGRAM_PORT, SOCK_DGRAM, IPPROTO_UDP, &new_cloud_server_addr) == 0))
-        {
+        if (MILLISEC_TIMER - time_last_getsockaddr_ms > 10*60000) {
             time_last_getsockaddr_ms = MILLISEC_TIMER;
-            if (memcmp(&new_cloud_server_addr, &cloud_server_addr, sizeof(struct sockaddr_in)) != 0) {
+            ret = getsockaddr(CLOUD_SERVER_HOSTNAME, CLOUD_SERVER_DGRAM_PORT, SOCK_DGRAM, IPPROTO_UDP, &new_cloud_server_addr);
+            if (ret == 0 && memcmp(&new_cloud_server_addr, &cloud_server_addr, sizeof(struct sockaddr_in)) != 0) {
                 cloud_server_addr = new_cloud_server_addr;
                 NOTICE("address of %s has changed to %s\n", 
                        CLOUD_SERVER_HOSTNAME, 
