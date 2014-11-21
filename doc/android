@@ -1,0 +1,242 @@
+TODO
+
+can I just copy the sample to workspace
+adb shell
+git checkin
+can I use debug prints
+
+
+===========
+
+INSTALL ANDROID DEVEL SDK
+-------------------------
+
+a) java
+  yum install java-1.7.0-openjdk-devel ant
+
+b) 32 bit libraries
+  yum install glibc.i686 glibc-devel.i686 libstdc++.i686 zlib-devel.i686 ncurses-devel.i686 \
+              libX11-devel.i686 libXrender.i686 libXrandr.i686
+
+c) Download Eclipse ADT with the Android SDK for Linux
+  http://developer.android.com/sdk/index.html
+
+  cd ~
+  unzip ~/Downloads/adt-bundle-linux-x86_64-20140702.zip 
+
+d) Add the following to PATH
+  /home/haid/adt-bundle-linux-x86_64-20140702/sdk/tools
+  /home/haid/adt-bundle-linux-x86_64-20140702/sdk/platform-tools
+
+e) Update SDK
+  run "android sdk", and install the following
+  - Tools
+   . Android SDK Tools
+   . Android SDK Platform-tools
+   . Android SDK Build-tools (highest version)
+  - Android 5.0 API 21
+   . SDK Platform
+   . ARM System Image   (this is for the emulator)
+  - Extras
+   . Android Support Library
+
+
+INSTALL ANDROID DEVEL NDK
+-------------------------
+
+a) download NDK
+  goto http://developer.android.com/tools/sdk/ndk/index.htm
+  download android-ndk-r10c-linux-x86_64.bin
+
+b) install
+  chmod 755 android-ndk-r10c-linux-x86_64.bin
+  ./android-ndk-r10c-linux-x86_64.bin     (self extracting)
+
+c) Add the following to PATH
+   /home/haid/android-ndk-r10c
+
+d) configure eclipse
+  . Open Preferences.
+  . In the pane on the left side of the Preferences window, select Android > NDK. 
+    The Android section expands, revealing a number of subsections.
+  . Select NDK. In the pane on the right side of the Preferences window, browse to the 
+    directory that contains the NDK.  Click OK to return to the Package Explorer display.
+
+
+ECLIPSE IDE
+-----------
+
+a) Running eclipse
+  /home/haid/adt-bundle-linux-x86_64-20140702/eclipse/eclipse
+     OR
+  alias eclipse='/home/haid/adt-bundle-linux-x86_64-20140702/eclipse/eclipse
+  eclipse
+
+
+BUILDING WITH NDK
+-----------------
+
+Here's the general outline of how you work with the NDK tools:
+
+- Place your native sources under <project>/jni/...
+
+- Create <project>/jni/Android.mk to describe your native sources to the NDK build system
+  Optional: Create <project>/jni/Application.mk.
+
+- Build your native code by running the 'ndk-build' script from your project's directory. 
+  It is located in the top-level NDK directory: 
+    . cd <project> 
+    . <ndk>/ndk-build
+  The build tools copy the stripped, shared libraries needed by your application 
+  to the proper location in the application's project directory.
+
+- Finally, compile your application using the SDK tools in the usual way. The SDK build tools will 
+  package the shared libraries in the application's deployable .apk file.
+
+
+BUILDING WITH COMMAND LINE
+--------------------------
+
+ First Time, to create build.xml ...
+  . android list targets
+  . android update project --target 1 --path .
+
+ ndk-build
+ ant debug     (-q for quiet)
+ adb install -r bin/HelloJni-debug.apk
+
+ ndk-build clean
+ ant clean
+
+
+BUILD AND RUN WITH ECLIPSE
+--------------------------
+
+  If was using command line, first clean, and rebuild ndk
+     ndk-build clean
+     ant-clean
+     ndk-build
+
+  Run Eclipse, Open Project, Select Run
+
+
+COMMAND LINE OVERVIEW
+---------------------
+
+Install
+ - android sdk   # manges installed components
+
+Help
+ - android help
+
+Emulator
+ - android avd                                 # manage emulator
+ - emulator64-arm -avd android21 -scale 0.32   # runs the emulator
+ - android list avd                            # Lists existing Android Virtual Devices.
+ - android list targets                        # Lists available targets
+ - android update project --target 1 --path .  # update project (creates build.xml needed by ant)
+
+Android Debug Bridge
+ - adb  options
+    -d  : use usb device
+    -e  : use emulator
+
+  adb help
+  adb shell [<command>]
+  adb install -r  bin/HelloJni.apk       # install app, use -r to replace
+  adb uninstall com.example.hellojni     # remove package
+  adb logcat                     # view device log
+  adb push                       # file xfer, also pull and sync
+
+  killall adb
+
+Ant Build Tool (tool for building java based projects, also called Apache ant)
+  ant help
+  ant clean
+  ant debug
+  ant release   (note that release builds must be signed)
+
+
+ADB SHELL COMMANDS
+------------------
+
+ls, mkdir, rmdir, echo, cat, touch, ifconfig, df
+
+
+EMULATOR
+--------
+
+I used the following options for my android21 virtual device:
+  AVD Name:      android21
+  Device:        Nexuss 
+  Target:        API Lvl 21
+  Keyboard:      yes
+  Skin:          Skin With Dynamic Hardware Controls
+  SD Card        16 MB
+  Use Host GPU:  Yes
+
+Run the emulator
+  emulator64-arm -avd android21 -scale 0.32
+
+Run App on Emulator
+ - adb install
+ - eclipse - run
+
+
+DEBUGGING WITH A DEVICE
+-----------------------
+
+Enable Debugging on the device
+- Settings > General > Build Number 7 times
+- Enable USB Debugging
+
+
+WEB SITES
+---------
+
+Getting Started
+  developer.android.com
+  developer.android.com/sdk/index.html
+  developer.android.com/sdk/installing/adding-packages.html
+  developer.android.com/tools/help/sdk-manager.html
+  fedoraproject.org/wiki/HOWTO_Setup_Android_Development
+
+Building First App
+  developer.android.com/training/basics/firstapp   -> 'start first lesson'
+  developer.android.com/training/basics/firstapp/creating-project.html
+  developer.android.com/training/basics/firstapp/running-app.html
+  developer.android.com/training/basics/firstapp/building-ui.html
+
+Layouts
+  developer.android.com/guide/topics/ui/declaring-layout.html
+
+===============================================================
+===============================================================
+====================   OLD   ==================================
+===============================================================
+===============================================================
+
+
+
+android create project --target 1 --name MyFirstApp --path $HOME/workspace/MyFirstApp --activity MainActivity --package com.example.myfirstapp
+
+Update AndroidManifest.xml, add ...
+   <uses-sdk android:minSdkVersion="19" android:targetSdkVersion="19" />
+
+   where android:targetSdkVersion -  An integer designating the API Level that the application 
+   targets. If not set, the default value equals that given to minSdkVersion.
+   This attribute informs the system that you have tested against the target version and the system 
+   should not enable any compatibility behaviors to maintain your app's forward-compatibility with 
+   the target version. The application is still able to run on older versions (down to minSdkVersion).
+
+Files
+  AndroidManifest.xml - fundamental characteristics of the app
+  src/                - Directory for your app's main source files. 
+                        It includes an Activity class that runs when your app is 
+                        launched using the app icon.
+  res/                - Contains several sub-directories for app resources. Here are just a few:
+    drawable-hdpi/    - Directory for drawable objects for high density screens.
+    layout/           - Directory for files that define your app's user interface.
+    values/           - Directory for other various XML files that contain a collection of 
+                        resources, such as string and color definitions.
+

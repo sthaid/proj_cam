@@ -1,0 +1,77 @@
+INSTALL JAVA
+------------
+
+  # install openjdk
+  yum install java-1.7.0-openjdk
+  yum install java-1.7.0-openjdk-devel
+  yum install java-1.7.0-openjdk-src
+  yum install java-1.7.0-openjdk-demo
+  yum install ant
+      Ant is a Java-based build tool created as part of the Apache open-source project. 
+      You can think of it as a Java version of make. Ant scripts have a structure and 
+      are written in XML. Similar to make, Ant targets can depend on other targets
+
+  # make symlink to jdk
+  cd ~/java
+  ln -s /usr/lib/jvm/java jdk
+
+  # expand src.zip  (this came from yum install java-1.7.0-openjdk-src)
+  mkdir jdk/src
+  cd jdk/src
+  jar xvf ../src.zip
+
+  # download oracle documentation, and unzip
+  http://www.oracle.com/technetwork/java/javase/documentation/java-se-7-doc-download-435117.html
+      download jdk-7u65-apidocs.zip
+  unzip ~/Downloads/jdk-7u65-apidocs.zip
+  mv docs oracle_docs
+
+  # viewing oracle documentation
+  file:///home/haid/java/oracle_docs/index.html
+
+  # jdk directories
+  bin      - compiler and tools
+  demo     - demos
+  docs     - html docs
+  include  - files for compiling natvie methods
+  jre      - java runtime environment
+  jre-abrt - ???
+  lib      - library files
+  sample   - sample (comes with demos)
+  src      - library source
+  tapset   - ???
+
+  -----------
+
+  # download Core Java Book sample code
+  http://horstmann.com/corejava.html
+  - download corejave.zip
+  - mkdir core_java_book
+  - cd core_java_book
+  - jar xvf corejava.zip
+
+
+HELLO WORLD PROGRAM
+-------------------
+
+  java hello world program - HelloWorld.java ...
+     public class HelloWorld {
+         public static void main(String[] args) {
+             System.out.println("Hello, World");
+             System.out.println(args[0]);
+         }
+     }
+
+  compile and run
+    javac HelloWorld.java
+    java HelloWorld
+
+
+TOOLS
+-----
+
+javac  prog.java    # compiles to prog.class
+java   prog         # runs prog.class
+
+java   applet.jave 
+appletviewer applet.html
