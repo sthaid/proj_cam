@@ -224,10 +224,14 @@ void * service_accept_thread(void * cx)
               CLOUD_SERVER_PORT);
 
         // read and validate http connect request
+        // XXX this needs a timeout
+        // XXX and maybe this should be a thread already
         bzero(http_connect_req, sizeof(http_connect_req));
+        set_sock_opts(sockfd, -1, -1, -1, 1000000);
         len = recv(sockfd, http_connect_req, sizeof(http_connect_req)-1, MSG_WAITALL);
+        set_sock_opts(sockfd, -1, -1, -1, 0);
         if (len != sizeof(http_connect_req)-1) {
-            ERROR("reading http connect request, %s\n", strerror(errno));
+            ERROR("reading http connect request, len=%d, %s\n", len, strerror(errno));
             continue;
         }
         if (strcmp(http_connect_req, HTTP_CONNECT_REQ) != 0) {
@@ -243,7 +247,9 @@ void * service_accept_thread(void * cx)
         }
 
         // read 96 bytes which contain the user_name,password,service
+        set_sock_opts(sockfd, -1, -1, -1, 1000000);
         len = recv(sockfd, login, sizeof(login), MSG_WAITALL);
+        set_sock_opts(sockfd, -1, -1, -1, 0);
         if (len != sizeof(login)) {
             ERROR("read of login info\n");
             continue;
