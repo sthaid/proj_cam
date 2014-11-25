@@ -232,6 +232,11 @@ cd ~/proj_cam
   git add android-project
 
 
+
+TO CLONE
+ git clone haid@sthaid-rs.dyndns.org:proj_cam.git
+
+
 xxxxxxxxxxxxxxxx left off here xxxxxxxxxxxxxxxxx
    - - - -  Adding SDL2 and SDL2_ttf  - - - - 
 
