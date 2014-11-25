@@ -7,6 +7,8 @@
 // TBD LATER - copy fonts to this directory,  and incorporate in backup
 // TBD LATER - debug commands to dump global data structures
 
+// XXX can't resize window
+
 //
 // defines 
 //
@@ -44,8 +46,6 @@
 #define NO_HANDLE                   (-1)
 #define NO_ZOOM                     (-1)
 #define INVALID_ZOOM                (-2)
-
-#define SDL_FLAGS                   (SDL_HWSURFACE | SDL_RESIZABLE)
 
 #define FONT_PATH                   "/usr/share/fonts/gnu-free/FreeMonoBold.ttf"
 #define FONTS_CHAR_WIDTH            fonts_cw
@@ -203,9 +203,9 @@ typedef struct {
     SDL_Rect      image_str2_pos;
     SDL_Rect      image_str3_pos;
 
-    SDL_Overlay * ovl;
-    int           ovl_w;
-    int           ovl_h;
+    SDL_Texture * texture;
+    int           texture_w;
+    int           texture_h;
 
     bool          image_highlight_last;
     char          wc_name_last[MAX_STR];
@@ -306,7 +306,8 @@ typedef uint32_t pixel_t;
 p2p_routines_t * p2p;
 char           * user_name;
 char           * password;
-SDL_Surface    * surface;
+SDL_Window     * window;
+SDL_Renderer   * renderer;
 int              win_width;
 int              win_height;
 int              zoom;
@@ -318,10 +319,11 @@ webcamdi_t       webcamdi[MAX_WEBCAM];
 event_t          event;
 ctl_t            ctl;
 
+#if 0
 pixel_t          color_black;
 pixel_t          color_white;
 pixel_t          color_blue;
-pixel_t          color_purple;
+#endif
 
 TTF_Font       * fonts;
 TTF_Font       * fontl;
@@ -447,14 +449,9 @@ int main(int argc, char **argv)
     if (SDL_Init(SDL_INIT_VIDEO) < 0) {
         FATAL("SDL_Init failed\n");
     }
-    if ((surface = SDL_SetVideoMode(win_width, win_height, 0, SDL_FLAGS)) == NULL) {
-        FATAL("SDL_SetVideoMode failed\n");
+    if (SDL_CreateWindowAndRenderer(win_width, win_height, 0, &window, &renderer) != 0) {  // XXX flags
+        FATAL("SDL_CreateWindowAndRenderer failed\n");
     }
-    SDL_WM_SetCaption("WEBCAM VIEWER", NULL);
-    color_black  = SDL_MapRGB(surface->format, 0, 0, 0);
-    color_white  = SDL_MapRGB(surface->format, 255, 255, 255);
-    color_blue   = SDL_MapRGB(surface->format, 0, 0, 255);
-    color_purple = SDL_MapRGB(surface->format, 0, 255, 255);
 
     // initialize True Type Font
     if (TTF_Init() < 0) {
@@ -525,10 +522,10 @@ int main(int argc, char **argv)
 
 void event_handler(void)
 {
-    SDL_Event ev;
-    SDLKey    key;
-    bool      shift;
-    int       i;
+    SDL_Event   ev;
+    SDL_Keycode key;
+    bool        shift;
+    int         i;
 
     #define MOUSE_AT_POS(pos) (ev.button.x >= (pos).x && \
                                ev.button.x < (pos).x + (pos).w && \
@@ -746,11 +743,13 @@ void event_handler(void)
             }
             break;
 
+#ifdef TBD
        case SDL_VIDEORESIZE:
             event.resize_w  = ev.resize.w;
             event.resize_h = ev.resize.h;
             event.resize_event = true;
             break;
+#endif
 
         case SDL_QUIT:
             event.quit_event = true;
@@ -896,7 +895,7 @@ void display_handler(void)
             (r).h = (_h); \
         } while (0)
 
-#define INIT_CTL_POS(fld,r,c,len) \
+    #define INIT_CTL_POS(fld,r,c,len) \
         do { \
             INIT_POS(ctl.fld, \
                      ctl_x + FONTS_CHAR_WIDTH/2 + (c) * FONTS_CHAR_WIDTH, \
@@ -905,68 +904,71 @@ void display_handler(void)
                      FONTS_CHAR_HEIGHT); \
         } while (0)
 
-    #define RENDER_BORDER(r,c) \
+    #define RENDER_CLEAR_ALL() \
         do { \
-            SDL_Rect line; \
-            /* draw the 4 lines that make the border of the webcam window */ \
-            line.x = (r).x; line.y = (r).y; line.w = (r).w; line.h = 1; \
-            SDL_FillRect(surface, &line, (c)); \
-            SDL_UpdateRect(surface, line.x, line.y, line.w, line.h); \
-            line.y = (r).y + (r).h - 1; \
-            SDL_FillRect(surface, &line, (c)); \
-            SDL_UpdateRect(surface, line.x, line.y, line.w, line.h); \
-            line.x = (r).x; line.y = (r).y; line.w = 1; line.h = (r).h; \
-            SDL_FillRect(surface, &line, (c)); \
-            SDL_UpdateRect(surface, line.x, line.y, line.w, line.h); \
-            line.x = (r).x + (r).w - 1; \
-            SDL_FillRect(surface, &line, (c)); \
-            SDL_UpdateRect(surface, line.x, line.y, line.w, line.h); \
-            /* draw the line below the title */ \
-            line.x = (r).x; line.y = (r).y+FONTS_CHAR_HEIGHT+1; line.w = (r).w; line.h = 1; \
-            SDL_FillRect(surface, &line, (c)); \
-            SDL_UpdateRect(surface, line.x, line.y, line.w, line.h); \
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE); \
+            SDL_RenderClear(renderer); \
+            display_updated = true; \
         } while (0)
 
-    #define RENDER_TEXT(font, str, pos, ctl) \
+    #define RENDER_CLEAR_RECT(pos) \
         do { \
-            SDL_Surface *ts; \
+            SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE); \
+            SDL_RenderFillRects(renderer, &(pos), 1); \
+            display_updated = true; \
+        } while (0)
+
+    #define RENDER_BORDER(pos, highlight) \
+        do { \
+            if (highlight) { \
+                SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE); \
+            } else { \
+                SDL_SetRenderDrawColor(renderer, 0, 0, 255, SDL_ALPHA_OPAQUE); \
+            } \
+            SDL_RenderDrawRect(renderer, &(pos)); \
+            SDL_RenderDrawLine(renderer,  \
+                               (pos).x, (pos).y+FONTS_CHAR_HEIGHT+1, \
+                               (pos).x+(pos).w-1, (pos).y+FONTS_CHAR_HEIGHT+1); \
+            display_updated = true; \
+        } while (0)
+
+    // XXX debug print on all calls
+    // XXX what if the string is bigger?
+    #define RENDER_TEXT(font, str, pos, ctl, centered) \
+        do { \
+            NOTICE("RENDER_TEXT '%s'\n", str); \
+            SDL_Surface *surface; \
+            SDL_Texture *texture; \
             SDL_Color fg_color_normal = {255,255,255}; \
             SDL_Color fg_color_ctl = {0,255,255}; \
             SDL_Color bg_color = {0,0,0}; \
-            SDL_FillRect(surface, &(pos), color_black); \
-            ts = TTF_RenderText_Shaded((font), (str), (ctl) ? fg_color_ctl : fg_color_normal, bg_color); \
-            if (ts) { \
-                SDL_Rect pos2 = (pos); \
-                SDL_BlitSurface(ts, NULL, surface, &pos2); \
-                SDL_FreeSurface(ts); \
-            }  \
-            SDL_UpdateRect(surface, (pos).x, (pos).y, (pos).w, (pos).h); \
-        } while (0)
-
-    #define RENDER_TEXT_CENTERED(font, str, pos) \
-        do { \
-            SDL_Surface *ts; \
-            SDL_Color fg_color = {255,255,255}; \
-            SDL_Color bg_color = {0,0,0}; \
-            SDL_FillRect(surface, &(pos), color_black); \
-            ts = TTF_RenderText_Shaded((font), (str), fg_color, bg_color); \
-            if (ts) { \
-                SDL_Rect pos2 = (pos); \
-                if (ts->w >= pos2.w) { \
-                    SDL_BlitSurface(ts, NULL, surface, &pos2); \
-                } else { \
-                    pos2.x += (pos2.w - ts->w) / 2; \
-                    pos2.w = ts->w; \
-                    SDL_BlitSurface(ts, NULL, surface, &pos2); \
-                } \
-                SDL_FreeSurface(ts); \
+            SDL_Rect pos2 = (pos); \
+            RENDER_CLEAR_RECT(pos2); \
+            surface = TTF_RenderText_Shaded((font), (str), (ctl) ? fg_color_ctl : fg_color_normal, bg_color); \
+            if (surface == NULL) { \
+                break; \
             } \
-            SDL_UpdateRect(surface, (pos).x, (pos).y, (pos).w, (pos).h); \
+            texture = SDL_CreateTextureFromSurface(renderer, surface); \
+            if (!centered || surface->w >= pos2.w) { \
+                pos2.w = surface->w; \
+            } else { \
+                pos2.x += (pos2.w - surface->w) / 2; \
+                pos2.w = surface->w; \
+            } \
+            SDL_RenderCopy(renderer, texture, NULL, &pos2); \
+            SDL_FreeSurface(surface); \
+            SDL_DestroyTexture(texture); \
+            display_updated = true; \
         } while (0)
 
+    #define RENDER_PRESENT() \
+        do { \
+            SDL_RenderPresent(renderer); \
+        } while (0)
 
     int               i;
     bool              display_all = false;
+    bool              display_updated = false; 
 
     static bool       first_call  = true;
 
@@ -995,6 +997,7 @@ void display_handler(void)
             event.redisplay_event = false;
         }
             
+#ifdef TBD  // XXX later
         // handle resize event
         if (event.resize_event) {
             win_width = (event.resize_w >= WIN_WIDTH_INITIAL ? event.resize_w : WIN_WIDTH_INITIAL);
@@ -1004,8 +1007,9 @@ void display_handler(void)
             }
             event.resize_event = false;
         }
+#endif
 
-#ifdef FULLS_SUPPORT
+#ifdef FULLS_SUPPORT  // XXX test with this
         // handle fulls event
         if (event.fulls_event) {
             SDL_WM_ToggleFullScreen(surface);
@@ -1139,9 +1143,9 @@ void display_handler(void)
     // if display_all then clear screen
     //
 
+
     if (display_all) {
-        SDL_FillRect(surface,NULL,color_black);
-        SDL_UpdateRect(surface, 0, 0, 0, 0);
+        RENDER_CLEAR_ALL();
     }
 
     //
@@ -1159,14 +1163,14 @@ void display_handler(void)
 
         // display border
         if (display_all || wc->image_highlight != wcdi->image_highlight_last) {
-            RENDER_BORDER(wcdi->wc_pos, wc->image_highlight ? color_white : color_blue);
+            RENDER_BORDER(wcdi->wc_pos, wc->image_highlight);
             wcdi->image_highlight_last = wc->image_highlight;
         }
 
         // display text line
         if (display_all) {
             sprintf(win_id_str, "%c", 'A'+i);
-            RENDER_TEXT(fonts, win_id_str, wcdi->win_id_pos, false);
+            RENDER_TEXT(fonts, win_id_str, wcdi->win_id_pos, false, false);
         }
 
         if (event.wc_name_input_in_prog[i]) {
@@ -1189,7 +1193,7 @@ void display_handler(void)
             strcpy(wc_name_str, "?");
         }
         if (display_all || strcmp(wc_name_str,wcdi->wc_name_last)) {
-            RENDER_TEXT(fonts, wc_name_str, wcdi->wc_name_pos, true);
+            RENDER_TEXT(fonts, wc_name_str, wcdi->wc_name_pos, true, false);
             strcpy(wcdi->wc_name_last, wc_name_str);
         }
 
@@ -1200,7 +1204,7 @@ void display_handler(void)
                 wc->image_w == 160                       ? "LOW" :
                                                            "?  "));
         if (display_all || strcmp(res_str,wcdi->res_str_last) || ctl.mode.mode != wcdi->mode_last) {
-            RENDER_TEXT(fonts, res_str, wcdi->res_pos, ctl.mode.mode == MODE_LIVE);
+            RENDER_TEXT(fonts, res_str, wcdi->res_pos, ctl.mode.mode == MODE_LIVE, false);
             strcpy(wcdi->res_str_last, res_str);
             wcdi->mode_last = ctl.mode.mode;
         }
@@ -1212,35 +1216,45 @@ void display_handler(void)
 
             // display image
             if (wc->image_display == IMAGE_DISPLAY_IMAGE) {
-                // create new overlay, if needed
-                if (wcdi->ovl == NULL || wcdi->ovl_w != wc->image_w || wcdi->ovl_h != wc->image_h) {
-                    wcdi->ovl_w = wc->image_w;
-                    wcdi->ovl_h = wc->image_h;
-                    if (wcdi->ovl != NULL) {
-                        SDL_FreeYUVOverlay(wcdi->ovl);
+                // create new texture, if needed
+                if (wcdi->texture == NULL || wcdi->texture_w != wc->image_w || wcdi->texture_h != wc->image_h) {
+                    wcdi->texture_w = wc->image_w;
+                    wcdi->texture_h = wc->image_h;
+                    if (wcdi->texture != NULL) {
+                        SDL_DestroyTexture(wcdi->texture);
                     }
-                    if ((wcdi->ovl = SDL_CreateYUVOverlay(wcdi->ovl_w, wcdi->ovl_h, SDL_YUY2_OVERLAY, surface)) == NULL) {
-                        ERROR("SDL_CreateYUVOverlay failed\n");
+                    wcdi->texture = SDL_CreateTexture(renderer, 
+                                                       SDL_PIXELFORMAT_YUY2,
+                                                       SDL_TEXTUREACCESS_STREAMING,  // XXX locking ?
+                                                       wcdi->texture_w,
+                                                       wcdi->texture_h);
+                    if (wcdi->texture == NULL) {
+                        ERROR("SDL_CreateTexture failed\n");
                         exit(1);
                     }
-                    DEBUG("created new overlay %dx%d\n", wcdi->ovl_w, wcdi->ovl_h);
+                    DEBUG("created new texture %dx%d\n", wcdi->texture_w, wcdi->texture_h);
                 }
 
-                // display the image
-                SDL_LockYUVOverlay(wcdi->ovl);
-                memcpy(wcdi->ovl->pixels[0], wc->image, wcdi->ovl_w * wcdi->ovl_h * 2);
-                SDL_UnlockYUVOverlay(wcdi->ovl);
-                SDL_DisplayYUVOverlay(wcdi->ovl, &wcdi->image_pos);
+                // update the texture with the image pixels  XXX LOCKING ?
+                SDL_UpdateTexture(wcdi->texture,
+                                  NULL,            // update entire texture
+                                  wc->image,       // pixels
+                                  wc->image_w*2);  // pitch
+
+                // copy the texture to the render target
+                SDL_RenderCopy(renderer, wcdi->texture, NULL, &wcdi->image_pos);
+
+                // set the display_updated flag so that RenderPresent will be called at the end of this routine
+                display_updated = true; 
             }
 
             // display text
             if (wc->image_display == IMAGE_DISPLAY_TEXT) {
                 // clear image and display strings   
-                SDL_FillRect(surface, &wcdi->image_pos, color_black);
-                SDL_UpdateRect(surface, wcdi->image_pos.x, wcdi->image_pos.y, wcdi->image_pos.w, wcdi->image_pos.h);
-                RENDER_TEXT_CENTERED(fontl, wc->image_str1, wcdi->image_str1_pos);
-                RENDER_TEXT_CENTERED(fontl, wc->image_str2, wcdi->image_str2_pos);
-                RENDER_TEXT_CENTERED(fontl, wc->image_str3, wcdi->image_str3_pos);
+                RENDER_CLEAR_RECT(wcdi->image_pos);
+                RENDER_TEXT(fontl, wc->image_str1, wcdi->image_str1_pos, false, true);
+                RENDER_TEXT(fontl, wc->image_str2, wcdi->image_str2_pos, false, true);
+                RENDER_TEXT(fontl, wc->image_str3, wcdi->image_str3_pos, false, true);
             }
         }
 
@@ -1297,8 +1311,7 @@ void display_handler(void)
     mode_change = (ctl.mode.mode_id != mode_id_last);
     mode_id_last = ctl.mode.mode_id;
     if (mode_change) {
-        SDL_FillRect(surface, &ctl.ctl_pos, color_black);
-        SDL_UpdateRect(surface, ctl.ctl_pos.x, ctl.ctl_pos.y, ctl.ctl_pos.w, ctl.ctl_pos.h);
+        RENDER_CLEAR_RECT(ctl.ctl_pos);
     }
 
     // determine if there has been a seconds time tick
@@ -1311,13 +1324,13 @@ void display_handler(void)
 
     // update mode
     if (display_all || mode_change) {
-        RENDER_TEXT(fonts, MODE_STR(ctl.mode.mode), ctl.mode_pos, true);
+        RENDER_TEXT(fonts, MODE_STR(ctl.mode.mode), ctl.mode_pos, true, false);
     }
 
 #ifdef FULLS_SUPPORT
     // update full screen control
     if (display_all || mode_change) {
-        RENDER_TEXT(fonts, "F", ctl.fulls_pos, true);
+        RENDER_TEXT(fonts, "F", ctl.fulls_pos, true, false);
     }
 #endif
 
@@ -1339,8 +1352,8 @@ void display_handler(void)
             strcpy(date_and_time_str+17, " Z");
         }
         date_and_time_str[8] = '\0';
-        RENDER_TEXT(fonts, date_and_time_str, ctl.date_pos, false);
-        RENDER_TEXT(fonts, date_and_time_str+9, ctl.time_pos, false);
+        RENDER_TEXT(fonts, date_and_time_str, ctl.date_pos, false, false);
+        RENDER_TEXT(fonts, date_and_time_str+9, ctl.time_pos, false, false);
     }
 
     // update playback time
@@ -1369,7 +1382,7 @@ void display_handler(void)
 
         sprintf(playback_time_str, "%s%d:%02d:%02d", sign_str, 24*days+hours, minutes, seconds);
 
-        RENDER_TEXT(fonts, playback_time_str, ctl.pb_time_pos, false);
+        RENDER_TEXT(fonts, playback_time_str, ctl.pb_time_pos, false, false);
     }
 
     // update playback state
@@ -1429,31 +1442,31 @@ void display_handler(void)
         }
 
         // render text for playback state
-        RENDER_TEXT(fonts, state_str,      ctl.pb_state_pos,       false);
-        RENDER_TEXT(fonts, "STOP",         ctl.pb_stop_pos,        true);
-        RENDER_TEXT(fonts, play_pause_str, ctl.pb_play_pause_pos,  true);
-        RENDER_TEXT(fonts, "DIR",          ctl.pb_dir_label_pos,   false);
-        RENDER_TEXT(fonts, dir_str,        ctl.pb_dir_value_pos,   true);
-        RENDER_TEXT(fonts, "SPEED",        ctl.pb_speed_label_pos, false);
-        RENDER_TEXT(fonts, speed_str,      ctl.pb_speed_value_pos, true);
+        RENDER_TEXT(fonts, state_str,      ctl.pb_state_pos,       false, false);
+        RENDER_TEXT(fonts, "STOP",         ctl.pb_stop_pos,        true,  false);
+        RENDER_TEXT(fonts, play_pause_str, ctl.pb_play_pause_pos,  true,  false);
+        RENDER_TEXT(fonts, "DIR",          ctl.pb_dir_label_pos,   false, false);
+        RENDER_TEXT(fonts, dir_str,        ctl.pb_dir_value_pos,   true,  false);
+        RENDER_TEXT(fonts, "SPEED",        ctl.pb_speed_label_pos, false, false);
+        RENDER_TEXT(fonts, speed_str,      ctl.pb_speed_value_pos, true,  false);
     }
 
     // update playback time control
     if ((ctl.mode.mode == MODE_PLAYBACK) &&
         (display_all || mode_change)) 
     {
-        RENDER_TEXT(fonts, "SEC",   ctl.pb_sec_pos,       false);
-        RENDER_TEXT(fonts, "-",     ctl.pb_sec_minus_pos, true);
-        RENDER_TEXT(fonts, "+",     ctl.pb_sec_plus_pos,  true);
-        RENDER_TEXT(fonts, "MIN",   ctl.pb_min_pos,       false);
-        RENDER_TEXT(fonts, "-",     ctl.pb_min_minus_pos, true);
-        RENDER_TEXT(fonts, "+",     ctl.pb_min_plus_pos,  true);
-        RENDER_TEXT(fonts, "HOUR",  ctl.pb_hour_pos,      false);
-        RENDER_TEXT(fonts, "-",     ctl.pb_hour_minus_pos,true);
-        RENDER_TEXT(fonts, "+",     ctl.pb_hour_plus_pos, true);
-        RENDER_TEXT(fonts, "DAY",   ctl.pb_day_pos,       false);
-        RENDER_TEXT(fonts, "-",     ctl.pb_day_minus_pos, true);
-        RENDER_TEXT(fonts, "+",     ctl.pb_day_plus_pos,  true);
+        RENDER_TEXT(fonts, "SEC",   ctl.pb_sec_pos,       false, false);
+        RENDER_TEXT(fonts, "-",     ctl.pb_sec_minus_pos, true,  false);
+        RENDER_TEXT(fonts, "+",     ctl.pb_sec_plus_pos,  true,  false);
+        RENDER_TEXT(fonts, "MIN",   ctl.pb_min_pos,       false, false);
+        RENDER_TEXT(fonts, "-",     ctl.pb_min_minus_pos, true,  false);
+        RENDER_TEXT(fonts, "+",     ctl.pb_min_plus_pos,  true,  false);
+        RENDER_TEXT(fonts, "HOUR",  ctl.pb_hour_pos,      false, false);
+        RENDER_TEXT(fonts, "-",     ctl.pb_hour_minus_pos,true,  false);
+        RENDER_TEXT(fonts, "+",     ctl.pb_hour_plus_pos, true,  false);
+        RENDER_TEXT(fonts, "DAY",   ctl.pb_day_pos,       false, false);
+        RENDER_TEXT(fonts, "-",     ctl.pb_day_minus_pos, true,  false);
+        RENDER_TEXT(fonts, "+",     ctl.pb_day_plus_pos,  true,  false);
     }
 
     // update playback record duration
@@ -1472,7 +1485,7 @@ void display_handler(void)
                 sprintf(record_dur_str, "%c", 'A'+i);
             }
 
-            RENDER_TEXT(fonts, record_dur_str, ctl.pb_record_dur_pos[i], false);
+            RENDER_TEXT(fonts, record_dur_str, ctl.pb_record_dur_pos[i], false, false);
         }
     }
 
@@ -1490,13 +1503,13 @@ void display_handler(void)
 
         switch (con_info_select) {
         case 0:
-            RENDER_TEXT(fonts, "TOTAL MB", ctl.con_info_title_pos, true);
+            RENDER_TEXT(fonts, "TOTAL MB", ctl.con_info_title_pos, true, false);
             for (i = 0; i < MAX_WEBCAM; i++) {
                 sprintf(str, "%c %d.%3.3d", 
                         'A'+i, 
                         (int)(webcam[i].recvd_bytes/1000000), 
                         (int)((webcam[i].recvd_bytes%1000000)/1000));
-                RENDER_TEXT(fonts, str, ctl.con_info_pos[i], false);
+                RENDER_TEXT(fonts, str, ctl.con_info_pos[i], false, false);
             }
             break;
         case 1: {
@@ -1506,23 +1519,23 @@ void display_handler(void)
             delta_us = (last_con_info_display_time_us != 0
                         ? (curr_time_us - last_con_info_display_time_us)
                         : 0);
-            RENDER_TEXT(fonts, "RATE Mb/S", ctl.con_info_title_pos, true);
+            RENDER_TEXT(fonts, "RATE Mb/S", ctl.con_info_title_pos, true, false);
             for (i = 0; i < MAX_WEBCAM; i++) {
                 mbit_per_sec = (delta_us != 0 
                                 ? 8.0 * (webcam[i].recvd_bytes - webcamdi[i].recvd_bytes_last) / delta_us
                                 : 0.0);
                 sprintf(str, "%c %5.3f", 'A'+i, mbit_per_sec);
-                RENDER_TEXT(fonts, str, ctl.con_info_pos[i], false);
+                RENDER_TEXT(fonts, str, ctl.con_info_pos[i], false, false);
             }
             break; }
         case 2:
-            RENDER_TEXT(fonts, "P2P SND DUP", ctl.con_info_title_pos, true);
+            RENDER_TEXT(fonts, "P2P SND DUP", ctl.con_info_title_pos, true, false);
             for (i = 0; i < MAX_WEBCAM; i++) {
                 sprintf(str, "%c %4d %4d",
                         'A'+i, 
                         webcam[i].status.p2p_resend_cnt,
                         webcam[i].status.p2p_recvdup_cnt);
-                RENDER_TEXT(fonts, str, ctl.con_info_pos[i], false);
+                RENDER_TEXT(fonts, str, ctl.con_info_pos[i], false, false);
             }
             break;
         }
@@ -1532,6 +1545,11 @@ void display_handler(void)
         }
         last_con_info_display_time_us = curr_time_us;
     }
+
+    // if updates have been made then present the display
+    if (display_updated) {
+        RENDER_PRESENT();
+    };
 }
 
 // -----------------  WEBCAM THREAD  -------------------------------------
