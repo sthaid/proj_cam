@@ -3,7 +3,7 @@ TARGETS = cloud_server wc_server admin viewer loginwc nettest_to_cloud_server ne
 
 CC = gcc
 CFLAGS = -c -g -O2 -pthread -fsigned-char -Wall 
-SDLCFLAGS = $(shell sdl-config --cflags)
+SDLCFLAGS = $(shell sdl2-config --cflags)
 
 CLOUD_SERVER_OBJS            = cloud_server.o p2p1.o util.o
 WC_SERVER_OBJS               = wc_main.o wc_nettest.o wc_login.o wc_webcam.o p2p1.o util.o jpeg_decode.o
@@ -29,7 +29,7 @@ admin: $(ADMIN_OBJS)
 	$(CC) -pthread -lrt -lreadline -o $@ $(ADMIN_OBJS)
 
 viewer: $(VIEWER_OBJS) 
-	$(CC) -pthread -lrt -ljpeg -lSDL -lSDL_ttf -o $@ $(VIEWER_OBJS)
+	$(CC) -pthread -lrt -ljpeg -lSDL2 -lSDL2_ttf -o $@ $(VIEWER_OBJS)
 
 loginwc: $(LOGIN_OBJS) 
 	$(CC) -pthread -lrt -o $@ $(LOGIN_OBJS)
