@@ -1,12 +1,63 @@
-TODO
+TODO 
+----
 
-can I just copy the sample to workspace
-adb shell
-git checkin
-can I use debug prints
+- port viewer to SDL2
+
+- poer viewer to android
+  - rethink util.c logging
+  - download jpeglibturbo
+
+- RW FILE
+   use assets directory
+
+    AAssetManager* mgr = AAssetManager_fromJava(env, assetManager);
+    AAsset* asset = AAssetManager_open(mgr, (const char *) js, AASSET_MODE_UNKNOWN);
+    if (NULL == asset) {
+        __android_log_print(ANDROID_LOG_ERROR, NF_LOG_TAG, "_ASSET_NOT_FOUND_");
+        return JNI_FALSE;
+    }
+    long size = AAsset_getLength(asset);
+    char* buffer = (char*) malloc (sizeof(char)*size);
+    AAsset_read (asset,buffer,size);
+    __android_log_print(ANDROID_LOG_ERROR, NF_LOG_TAG, buffer);
+    AAsset_close(asset);
+
+    # for native asset manager
+    LOCAL_LDLIBS    += -landroid
+
+    #include <android/asset_manager.h>
+
+- scripts
+  - write my own build script, check for errors after each step
+  - logcat
+
+- change the minimum platform
+     - find link to documntation for platform revs and
+       understand the min max meaning
+
+- my ip addr problem on the Dell
+
+- misc
+  - lock streaming texture
+
+LATER
+-----
+- why is t1 so slow
 
 
-===========
+DONE
+---
+- load SDL2
+- sample programs in SDL2
+  - on fedora
+  - on tablet
+- update t1 to log to a file
+- shoud I use static linking  - dynamic should be okay
+- what libraries are already available for jpeg
+
+=========== =========== =========== =========== =========== =========== =========== ===========
+=========== =========== =========== =========== =========== =========== =========== ===========
+=========== =========== =========== =========== =========== =========== =========== ===========
 
 INSTALL ANDROID DEVEL SDK
 -------------------------
@@ -55,7 +106,8 @@ b) install
 c) Add the following to PATH
    /home/haid/android-ndk-r10c
 
-d) configure eclipse
+d) configure eclipse  
+  . NOTE: PREFERENCES > ANDROID > NDK : DOES NOT EXIST
   . Open Preferences.
   . In the pane on the left side of the Preferences window, select Android > NDK. 
     The Android section expands, revealing a number of subsections.
@@ -63,8 +115,8 @@ d) configure eclipse
     directory that contains the NDK.  Click OK to return to the Package Explorer display.
 
 
-ECLIPSE IDE
------------
+USING ECLIPSE IDE
+-----------------
 
 a) Running eclipse
   /home/haid/adt-bundle-linux-x86_64-20140702/eclipse/eclipse
@@ -72,9 +124,12 @@ a) Running eclipse
   alias eclipse='/home/haid/adt-bundle-linux-x86_64-20140702/eclipse/eclipse
   eclipse
 
+b) Building in eclipse
+  Run Eclipse, Open Project, Select Run
 
-BUILDING WITH NDK
------------------
+
+BUILDING NDK APPS WITH CMD LINE
+-------------------------------
 
 Here's the general outline of how you work with the NDK tools:
 
@@ -93,31 +148,119 @@ Here's the general outline of how you work with the NDK tools:
 - Finally, compile your application using the SDK tools in the usual way. The SDK build tools will 
   package the shared libraries in the application's deployable .apk file.
 
+- Summary
+    Samples can be simply copied to the workspace. Importing into eclipse will
+    update eclipse metadata so that eclipse can manage the project.
 
-BUILDING WITH COMMAND LINE
---------------------------
+    One Time ...
+     . delete build.xml if it already exists
+     . android list targets
+     . android update project --target 1 --path .
 
- First Time, to create build.xml ...
-  . android list targets
-  . android update project --target 1 --path .
+    Build
+      . ndk-build
+      . ant debug                               # -q for quiet
+      . adb install -r bin/HelloJni-debug.apk   # or 'ant install'
 
- ndk-build
- ant debug     (-q for quiet)
- adb install -r bin/HelloJni-debug.apk
-
- ndk-build clean
- ant clean
+    Clean
+      . ndk-build clean
+      . ant clean
+      . TBD what about removing libs and objs
 
 
-BUILD AND RUN WITH ECLIPSE
---------------------------
+SETTING UP MY PROJECT
+---------------------
 
-  If was using command line, first clean, and rebuild ndk
-     ndk-build clean
-     ant-clean
-     ndk-build
+XXX where to download the tar.gz
+XXX comment the following
 
-  Run Eclipse, Open Project, Select Run
+cd ~
+tar -xvf ~/Downloads/SDL2-2.0.3.tar.gz
+tar -xvf Downloads/SDL2_ttf-2.0.12.tar.gz
+git clone https://github.com/folecr/jpeg8d
+rm -rf jpeg8d/.git
+
+cd ~/proj_cam
+cp -r ~/SDL2-2.0.3/android-project/ .
+
+cd ~/proj_cam/android_project
+mv ~/SDL2-2.0.3      jni
+mv ~/SDL2_ttf-2.0.12 jni
+mv ~/jpeg8d          jni
+
+rm build.xml
+
+vi AndroidManifest.xml
+  change android:minSdkVersion to 19
+  delete android:targetSdkVersion
+
+vi src/org/libsdl/app/SDLActivity.java
+  change the code starting with "// Load the .so", to
+    static {
+        System.loadLibrary("SDL2");
+        System.loadLibrary("SDL2_ttf");
+        System.loadLibrary("jpeg");
+        System.loadLibrary("main");
+    }
+
+cd jni
+  vi Application.mk
+    set APP_ABI := armeabi-v7a
+
+cd jpeg8d
+  cp Android.mk Android_static.mk
+  vi Android.mk
+    convert to shared library make
+
+cd ../src
+  rm Android_static.mk
+  ln -s ../../../viewer.c .
+  ln -s ../../../p2p1.c .
+  ln -s ../../../p2p2.c .
+  ln -s ../../../util.c .
+  ln -s ../../../jpeg_decode.c .
+  ln -s ../../../wc.h .
+  vi Android.mk, update as follows ...
+     LOCAL_C_INCLUDES := $(LOCAL_PATH)/$(SDL_PATH)/include \
+                         $(LOCAL_PATH)/$(SDL_TTF_PATH) \
+                         $(LOCAL_PATH)/$(JPEG_PATH)
+     LOCAL_SRC_FILES := $(SDL_PATH)/src/main/android/SDL_android_main.c \
+                        viewer.c
+     LOCAL_SHARED_LIBRARIES := SDL2 SDL2_ttf jpeg
+
+cd ~/proj_cam
+  git add android-project
+
+
+xxxxxxxxxxxxxxxx left off here xxxxxxxxxxxxxxxxx
+   - - - -  Adding SDL2 and SDL2_ttf  - - - - 
+
+- Documentation
+  http://wiki.libsdl.org/moin.fcg/MigrationGuide 
+
+- to develop on fedora linux using SDL2 and SDL2_ttf 
+  . yum install SDL2-devel SDL2_ttf-devel
+
+- Adding SDL2 library to jni ...
+  . download SDL2 source  http://www.libsdl.org/hg.php
+  . tar -xvf Downloads/SDL2-2.0.3.tar.gz
+  . Read README-android.txt
+  . ln -s ~/SDL2-2.0.3 workspace/android-project
+
+- Adding SDL2_ttf to jni
+  . download soruce from https://www.libsdl.org/projects/SDL_ttf
+  . uncomment line in workspace/android-project/src/org/libsdl/app/SDLActivity.java
+       System.loadLibrary("SDL2_ttf");
+
+   - - - -  Adding jpeglibturbo  - - - - - - - 
+
+- refer to http://stackoverflow.com/questions/12260149/libjpeg-turbo-for-android
+- downoad from 
+    git clone git://git.linaro.org/people/tomgall/libjpeg-turbo/libjpeg-turbo.git -b linaro-android
+- symlink into jni
+- edit jni/Application.mk, 
+   set  APP_ABI := armeabi-v7a
+
 
 
 COMMAND LINE OVERVIEW
@@ -160,7 +303,51 @@ Ant Build Tool (tool for building java based projects, also called Apache ant)
 ADB SHELL COMMANDS
 ------------------
 
-ls, mkdir, rmdir, echo, cat, touch, ifconfig, df
+General
+  ls, mkdir, rmdir, echo, cat, touch, ifconfig, df
+
+  top 
+    -m <max_procs>
+
+  ps 
+    -t show threads, comes up with threads in the list
+    -x shows time, user time and system time in seconds
+    -P show scheduling policy, either bg or fg are common
+    -p show priorities, niceness level
+    -c show CPU (may not be available prior to Android 4.x) involved
+    [pid] filter by PID if numeric, or…
+    [name] …filter by process name
+
+Logging
+  logcat -h
+  logcat                  # displays everything
+  logcat -s Watchdog:I    # displays log from Watchdog
+  logcat -s SDL/APP       # all from my SDL APP
+
+   Priorities are:
+       V    Verbose
+       D    Debug
+       I    Info
+       W    Warn
+       E    Error
+       F    Fatal
+       S    Silent (supress all output)
+    for example "I" displays Info level and below (I,W,E,F)
+
+
+Networking
+  netconfig
+  ifconfig wlan0
+
+Misc
+  getprop ro.product.device
+  getprop
+
+Proc Filesystem
+  cat /proc/<pid>/cmdline
+
+Additional Info
+
 
 
 EMULATOR
