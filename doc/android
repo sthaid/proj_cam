@@ -91,6 +91,10 @@ e) Update SDK
   - Extras
    . Android Support Library
 
+f) export ANDROID_HOME
+  ANDROID_HOME=/home/haid/adt-bundle-linux-x86_64-20140702/sdk
+  export ANDROID_HOME
+
 
 INSTALL ANDROID DEVEL NDK
 -------------------------
@@ -153,9 +157,9 @@ Here's the general outline of how you work with the NDK tools:
     update eclipse metadata so that eclipse can manage the project.
 
     One Time ...
-     . delete build.xml if it already exists
-     . android list targets
-     . android update project --target 1 --path .
+      . delete build.xml if it already exists
+      . android list targets
+      . android update project --target 1 --path .
 
     Build
       . ndk-build
@@ -171,29 +175,38 @@ Here's the general outline of how you work with the NDK tools:
 SETTING UP MY PROJECT
 ---------------------
 
-XXX where to download the tar.gz
-XXX comment the following
+# download SDL2 and SDL2_ttf from
+  . http://www.libsdl.org/hg.php
+  . https://www.libsdl.org/projects/SDL_ttf
 
+# expand the SDL2 and SDL2_ttf 
 cd ~
-tar -xvf ~/Downloads/SDL2-2.0.3.tar.gz
+tar -xvf Downloads/SDL2-2.0.3.tar.gz
 tar -xvf Downloads/SDL2_ttf-2.0.12.tar.gz
+
+# get copy of libjpeg source, and remove the git metadata
+cd ~
 git clone https://github.com/folecr/jpeg8d
 rm -rf jpeg8d/.git
 
+# copy the template android-project into proj_cam
 cd ~/proj_cam
 cp -r ~/SDL2-2.0.3/android-project/ .
 
+# move the SDL2, SDL2_ttf, and libjpeg source code directories to jni
 cd ~/proj_cam/android_project
 mv ~/SDL2-2.0.3      jni
 mv ~/SDL2_ttf-2.0.12 jni
 mv ~/jpeg8d          jni
 
-rm build.xml
-
+# update AndroidManifest
+cd ~/proj_cam/android_project
 vi AndroidManifest.xml
   change android:minSdkVersion to 19
   delete android:targetSdkVersion
 
+# update java shim
+cd ~/proj_cam/android_project
 vi src/org/libsdl/app/SDLActivity.java
   change the code starting with "// Load the .so", to
     static {
@@ -203,40 +216,55 @@ vi src/org/libsdl/app/SDLActivity.java
         System.loadLibrary("main");
     }
 
-cd jni
-  vi Application.mk
-    set APP_ABI := armeabi-v7a
+# build only the armeabi-v7a
+cd ~/proj_cam/android_project/jni
+vi Application.mk
+  set APP_ABI := armeabi-v7a
 
-cd jpeg8d
-  cp Android.mk Android_static.mk
-  vi Android.mk
-    convert to shared library make
+# convert libjpeg from static to shared library 
+cd ~/proj_cam/android_project/jni/jpeg8d
+cp Android.mk Android_static.mk
+vi Android.mk
+  convert to shared library make
 
-cd ../src
-  rm Android_static.mk
-  ln -s ../../../viewer.c .
-  ln -s ../../../p2p1.c .
-  ln -s ../../../p2p2.c .
-  ln -s ../../../util.c .
-  ln -s ../../../jpeg_decode.c .
-  ln -s ../../../wc.h .
-  vi Android.mk, update as follows ...
-     LOCAL_C_INCLUDES := $(LOCAL_PATH)/$(SDL_PATH)/include \
-                         $(LOCAL_PATH)/$(SDL_TTF_PATH) \
-                         $(LOCAL_PATH)/$(JPEG_PATH)
-     LOCAL_SRC_FILES := $(SDL_PATH)/src/main/android/SDL_android_main.c \
-                        viewer.c
-     LOCAL_SHARED_LIBRARIES := SDL2 SDL2_ttf jpeg
+# setup the jni/src directory
+cd ~/proj_cam/android_project/jni/src
+rm Android_static.mk
+ln -s ../../../viewer.c .
+ln -s ../../../p2p1.c .
+ln -s ../../../p2p2.c .
+ln -s ../../../util.c .
+ln -s ../../../jpeg_decode.c .
+ln -s ../../../wc.h .
+vi Android.mk, update as follows ...
+   LOCAL_C_INCLUDES := $(LOCAL_PATH)/$(SDL_PATH)/include \
+                       $(LOCAL_PATH)/$(SDL_TTF_PATH) \
+                       $(LOCAL_PATH)/$(JPEG_PATH)
+   LOCAL_SRC_FILES := $(SDL_PATH)/src/main/android/SDL_android_main.c \
+                      viewer.c
+   LOCAL_SHARED_LIBRARIES := SDL2 SDL2_ttf jpeg
 
+# remove and recreate build.xml
+rm build.xml
+android update project --target 1 --path .
+
+# add android-project to git
 cd ~/proj_cam
-  git add android-project
+git add android-project
+git commit --all
+git push
 
 
+GIT USAGE
+---------
 
-TO CLONE
  git clone haid@sthaid-rs.dyndns.org:proj_cam.git
+ git clone ssh://haid@sthaid-rs.dyndns.org:443/~haid/proj_cam.git
 
 
+
+xxxxxxxxxxxxxxxx left off here xxxxxxxxxxxxxxxxx
+xxxxxxxxxxxxxxxx left off here xxxxxxxxxxxxxxxxx
 xxxxxxxxxxxxxxxx left off here xxxxxxxxxxxxxxxxx
    - - - -  Adding SDL2 and SDL2_ttf  - - - - 
 
@@ -247,13 +275,11 @@ xxxxxxxxxxxxxxxx left off here xxxxxxxxxxxxxxxxx
   . yum install SDL2-devel SDL2_ttf-devel
 
 - Adding SDL2 library to jni ...
-  . download SDL2 source  http://www.libsdl.org/hg.php
   . tar -xvf Downloads/SDL2-2.0.3.tar.gz
   . Read README-android.txt
   . ln -s ~/SDL2-2.0.3 workspace/android-project
 
 - Adding SDL2_ttf to jni
-  . download soruce from https://www.libsdl.org/projects/SDL_ttf
   . uncomment line in workspace/android-project/src/org/libsdl/app/SDLActivity.java
        System.loadLibrary("SDL2_ttf");
 
