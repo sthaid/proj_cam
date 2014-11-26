@@ -1,85 +1,84 @@
 TODO 
 ----
 
-- port viewer to SDL2
-
 - poer viewer to android
   - rethink util.c logging
   - download jpeglibturbo
+  - lock streaming texture (if this is needed)
 
 - RW FILE
-   use assets directory
+   - Refer to SDL readme
+   - use assets directory
+   - NDK ...
+       AAssetManager* mgr = AAssetManager_fromJava(env, assetManager);
+       AAsset* asset = AAssetManager_open(mgr, (const char *) js, AASSET_MODE_UNKNOWN);
+       if (NULL == asset) {
+           __android_log_print(ANDROID_LOG_ERROR, NF_LOG_TAG, "_ASSET_NOT_FOUND_");
+           return JNI_FALSE;
+       }
+       long size = AAsset_getLength(asset);
+       char* buffer = (char*) malloc (sizeof(char)*size);
+       AAsset_read (asset,buffer,size);
+       __android_log_print(ANDROID_LOG_ERROR, NF_LOG_TAG, buffer);
+       AAsset_close(asset);
 
-    AAssetManager* mgr = AAssetManager_fromJava(env, assetManager);
-    AAsset* asset = AAssetManager_open(mgr, (const char *) js, AASSET_MODE_UNKNOWN);
-    if (NULL == asset) {
-        __android_log_print(ANDROID_LOG_ERROR, NF_LOG_TAG, "_ASSET_NOT_FOUND_");
-        return JNI_FALSE;
-    }
-    long size = AAsset_getLength(asset);
-    char* buffer = (char*) malloc (sizeof(char)*size);
-    AAsset_read (asset,buffer,size);
-    __android_log_print(ANDROID_LOG_ERROR, NF_LOG_TAG, buffer);
-    AAsset_close(asset);
+       # for native asset manager
+       LOCAL_LDLIBS    += -landroid
 
-    # for native asset manager
-    LOCAL_LDLIBS    += -landroid
-
-    #include <android/asset_manager.h>
-
-- scripts
-  - write my own build script, check for errors after each step
-  - logcat
-
-- change the minimum platform
-     - find link to documntation for platform revs and
-       understand the min max meaning
+       #include <android/asset_manager.h>
 
 - my ip addr problem on the Dell
 
-- misc
-  - lock streaming texture
-
-LATER
------
-- why is t1 so slow
-
-
-DONE
----
-- load SDL2
-- sample programs in SDL2
-  - on fedora
-  - on tablet
-- update t1 to log to a file
-- shoud I use static linking  - dynamic should be okay
-- what libraries are already available for jpeg
 
 =========== =========== =========== =========== =========== =========== =========== ===========
 =========== =========== =========== =========== =========== =========== =========== ===========
 =========== =========== =========== =========== =========== =========== =========== ===========
+
+TABLE OF CONTENTS
+=================
+
+INSTALL ANDROID DEVEL SDK
+INSTALL ANDROID DEVEL NDK
+BUILDING NDK APPS WITH CMD LINE
+ANDROID PROJECT
+SETTING UP MY PROJECT
+SDL NOTES
+LIBJPEG NOTES
+COMMAND LINE USAGE   
+ADB SHELL COMMANDS
+GIT NOTES
+EMULATOR
+USING ECLIPSE IDE
+DEBUGGING WITH A DEVICE
+WEB SITES
+
+
 
 INSTALL ANDROID DEVEL SDK
 -------------------------
 
-a) java
+a) install java and ant
   yum install java-1.7.0-openjdk-devel ant
 
-b) 32 bit libraries
+b) install 32 bit libraries
   yum install glibc.i686 glibc-devel.i686 libstdc++.i686 zlib-devel.i686 ncurses-devel.i686 \
               libX11-devel.i686 libXrender.i686 libXrandr.i686
 
 c) Download Eclipse ADT with the Android SDK for Linux
   http://developer.android.com/sdk/index.html
-
   cd ~
   unzip ~/Downloads/adt-bundle-linux-x86_64-20140702.zip 
+  ln -s adt-bundle-linux-x86_64-20140702/sdk android-sdk
 
 d) Add the following to PATH
-  /home/haid/adt-bundle-linux-x86_64-20140702/sdk/tools
-  /home/haid/adt-bundle-linux-x86_64-20140702/sdk/platform-tools
+  $HOME/android-sdk/tools
+  $HOME/android-sdk/platform-tools
 
-e) Update SDK
+e) export ANDROID_HOME
+  ANDROID_HOME=/home/haid/adt-bundle-linux-x86_64-20140702/sdk
+  export ANDROID_HOME
+
+f) Update SDK
   run "android sdk", and install the following
   - Tools
    . Android SDK Tools
@@ -91,45 +90,25 @@ e) Update SDK
   - Extras
    . Android Support Library
 
-f) export ANDROID_HOME
-  ANDROID_HOME=/home/haid/adt-bundle-linux-x86_64-20140702/sdk
-  export ANDROID_HOME
-
 
 INSTALL ANDROID DEVEL NDK
 -------------------------
 
-a) download NDK
-  goto http://developer.android.com/tools/sdk/ndk/index.htm
-  download android-ndk-r10c-linux-x86_64.bin
-
-b) install
-  chmod 755 android-ndk-r10c-linux-x86_64.bin
-  ./android-ndk-r10c-linux-x86_64.bin     (self extracting)
+a) download NDK and install, the install file is self extracting
+  http://developer.android.com/tools/sdk/ndk/index.htm
+   . download android-ndk-r10c-linux-x86_64.bin
+  cd ~
+  chmod 755 Download/android-ndk-r10c-linux-x86_64.bin
+  Downloads/android-ndk-r10c-linux-x86_64.bin
+  ln -s android-ndk-r10c android-ndk
 
 c) Add the following to PATH
-   /home/haid/android-ndk-r10c
+   $HOME/android-ndk
 
-d) configure eclipse  
-  . NOTE: PREFERENCES > ANDROID > NDK : DOES NOT EXIST
-  . Open Preferences.
-  . In the pane on the left side of the Preferences window, select Android > NDK. 
-    The Android section expands, revealing a number of subsections.
-  . Select NDK. In the pane on the right side of the Preferences window, browse to the 
-    directory that contains the NDK.  Click OK to return to the Package Explorer display.
-
-
-USING ECLIPSE IDE
------------------
-
-a) Running eclipse
-  /home/haid/adt-bundle-linux-x86_64-20140702/eclipse/eclipse
-     OR
-  alias eclipse='/home/haid/adt-bundle-linux-x86_64-20140702/eclipse/eclipse
-  eclipse
-
-b) Building in eclipse
-  Run Eclipse, Open Project, Select Run
+note: earlier ndk versions are available ...
+  . http://dl.google.com/android/ndk/android-ndk-r9-linux-x86_64.tar.bz2
+  . http://dl.google.com/android/ndk/android-ndk-r9d-linux-x86_64.tar.bz2
+  . etc
 
 
 BUILDING NDK APPS WITH CMD LINE
@@ -166,10 +145,18 @@ Here's the general outline of how you work with the NDK tools:
       . ant debug                               # -q for quiet
       . adb install -r bin/HelloJni-debug.apk   # or 'ant install'
 
-    Clean
-      . ndk-build clean
-      . ant clean
-      . TBD what about removing libs and objs
+
+ANDROID PROJECT
+---------------
+
+AndroidManifest.xml
+   <uses-sdk android:minSdkVersion="19" android:targetSdkVersion="19" />
+
+   where android:targetSdkVersion -  An integer designating the API Level that the application 
+   targets. If not set, the default value equals that given to minSdkVersion.
+   This attribute informs the system that you have tested against the target version and the system 
+   should not enable any compatibility behaviors to maintain your app's forward-compatibility with 
+   the target version. The application is still able to run on older versions (down to minSdkVersion).
 
 
 SETTING UP MY PROJECT
@@ -220,6 +207,7 @@ vi src/org/libsdl/app/SDLActivity.java
 cd ~/proj_cam/android_project/jni
 vi Application.mk
   set APP_ABI := armeabi-v7a
+  APP_PLATFORM := android-19
 
 # convert libjpeg from static to shared library 
 cd ~/proj_cam/android_project/jni/jpeg8d
@@ -255,53 +243,48 @@ git commit --all
 git push
 
 
-GIT USAGE
+SDL NOTES
 ---------
 
- git clone haid@sthaid-rs.dyndns.org:proj_cam.git
- git clone ssh://haid@sthaid-rs.dyndns.org:443/~haid/proj_cam.git
+- SDL Documentation
+  - https://wiki.libsdl.org/APIByCategory
+  - http://wiki.libsdl.org/moin.fcg/MigrationGuide 
 
-
-
-xxxxxxxxxxxxxxxx left off here xxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxx left off here xxxxxxxxxxxxxxxxx
-xxxxxxxxxxxxxxxx left off here xxxxxxxxxxxxxxxxx
-   - - - -  Adding SDL2 and SDL2_ttf  - - - - 
-
-- Documentation
-  http://wiki.libsdl.org/moin.fcg/MigrationGuide 
-
-- to develop on fedora linux using SDL2 and SDL2_ttf 
+- SDL2 and SDL2_ttf Download and Install in App
+  - https://www.libsdl.org/download-2.0.php
+  - https://www.libsdl.org/projects/SDL_ttf/
+  - place the downloaded directories under jni
+  - be sure the Android.mk in these directories is for shared libraries
+  - update src/org/libsdl/app/SDLActivity.java to load the shared libraries
+  
+- NOTE: to develop using SDL on fedora linux using SDL2 and SDL2_ttf 
   . yum install SDL2-devel SDL2_ttf-devel
 
-- Adding SDL2 library to jni ...
-  . tar -xvf Downloads/SDL2-2.0.3.tar.gz
-  . Read README-android.txt
-  . ln -s ~/SDL2-2.0.3 workspace/android-project
 
-- Adding SDL2_ttf to jni
-  . uncomment line in workspace/android-project/src/org/libsdl/app/SDLActivity.java
-       System.loadLibrary("SDL2_ttf");
+LIBJPEG NOTES
+-------------
 
-   - - - -  Adding jpeglibturbo  - - - - - - - 
-
-- refer to http://stackoverflow.com/questions/12260149/libjpeg-turbo-for-android
-- downoad from 
-    git clone git://git.linaro.org/people/tomgall/libjpeg-turbo/libjpeg-turbo.git -b linaro-android
-- symlink into jni
-- edit jni/Application.mk, 
-   set  APP_ABI := armeabi-v7a
+- JPEG8D Download and Install in App
+  - get copy of libjpeg source, and optionally remove the git metadata
+      git clone https://github.com/folecr/jpeg8d
+      rm -rf jpeg8d/.git    (optional)
+  - place the source dir undir jni
+  - be sure the Android.mk in this directory is for shared libraries
+  - update src/org/libsdl/app/SDLActivity.java to load the shared libraries
 
 
-
-COMMAND LINE OVERVIEW
----------------------
+COMMAND LINE USAGE   
+------------------
 
 Install
- - android sdk   # manges installed components
+ - android sdk   # manages installed components
 
 Help
  - android help
+
+Project
+ - android create project --target 1 --name MyFirstApp --path $HOME/workspace/MyFirstApp \
+                           --activity MainActivity --package com.example.myfirstapp
 
 Emulator
  - android avd                                 # manage emulator
@@ -380,6 +363,12 @@ Proc Filesystem
 Additional Info
 
 
+GIT NOTES
+---------
+
+ git clone haid@sthaid-rs.dyndns.org:proj_cam.git
+ git clone ssh://haid@sthaid-rs.dyndns.org:443/~haid/proj_cam.git
+
 
 EMULATOR
 --------
@@ -401,6 +390,26 @@ Run App on Emulator
  - eclipse - run
 
 
+USING ECLIPSE IDE
+-----------------
+
+a) configure eclipse  to use NDK
+  . NOTE: I wasn't able to get this to work because 
+    'Preferences > Android > NDK' does not exist
+  . Open Preferences.
+  . In the pane on the left side of the Preferences window, select Android > NDK. 
+    The Android section expands, revealing a number of subsections.
+  . Select NDK. In the pane on the right side of the Preferences window, browse to the 
+    directory that contains the NDK.  Click OK to return to the Package Explorer display.
+
+b) Running eclipse
+  alias eclipse='/home/haid/adt-bundle-linux-x86_64-20140702/eclipse/eclipse
+  eclipse
+
+b) Building in eclipse
+  Run Eclipse, Open Project, Select Run
+
+
 DEBUGGING WITH A DEVICE
 -----------------------
 
@@ -414,47 +423,13 @@ WEB SITES
 
 Getting Started
   developer.android.com
-  developer.android.com/sdk/index.html
-  developer.android.com/sdk/installing/adding-packages.html
-  developer.android.com/tools/help/sdk-manager.html
+  developer.android.com/sdk
+  developer.android.com/tools/help
   fedoraproject.org/wiki/HOWTO_Setup_Android_Development
 
 Building First App
-  developer.android.com/training/basics/firstapp   -> 'start first lesson'
-  developer.android.com/training/basics/firstapp/creating-project.html
-  developer.android.com/training/basics/firstapp/running-app.html
-  developer.android.com/training/basics/firstapp/building-ui.html
+  developer.android.com/training/basics/firstapp
 
 Layouts
   developer.android.com/guide/topics/ui/declaring-layout.html
-
-===============================================================
-===============================================================
-====================   OLD   ==================================
-===============================================================
-===============================================================
-
-
-
-android create project --target 1 --name MyFirstApp --path $HOME/workspace/MyFirstApp --activity MainActivity --package com.example.myfirstapp
-
-Update AndroidManifest.xml, add ...
-   <uses-sdk android:minSdkVersion="19" android:targetSdkVersion="19" />
-
-   where android:targetSdkVersion -  An integer designating the API Level that the application 
-   targets. If not set, the default value equals that given to minSdkVersion.
-   This attribute informs the system that you have tested against the target version and the system 
-   should not enable any compatibility behaviors to maintain your app's forward-compatibility with 
-   the target version. The application is still able to run on older versions (down to minSdkVersion).
-
-Files
-  AndroidManifest.xml - fundamental characteristics of the app
-  src/                - Directory for your app's main source files. 
-                        It includes an Activity class that runs when your app is 
-                        launched using the app icon.
-  res/                - Contains several sub-directories for app resources. Here are just a few:
-    drawable-hdpi/    - Directory for drawable objects for high density screens.
-    layout/           - Directory for files that define your app's user interface.
-    values/           - Directory for other various XML files that contain a collection of 
-                        resources, such as string and color definitions.
 
