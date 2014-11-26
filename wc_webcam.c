@@ -289,7 +289,7 @@ void * wc_svc_webcam(void * cx)
     uint64_t play_last_frame_send_time_us  = 0;
     uint64_t play_frame_read_fail_time_us  = 0;
 
-    NOTICE("starting\n");
+    INFO("starting\n");
 
     while (true) {
         //
@@ -399,8 +399,8 @@ void * wc_svc_webcam(void * cx)
 
                 // if we are too far behind then skip frames
                 if (frame_post_tail - frame_post_head > MAX_FRAME_BEHIND) {
-                    WARNING("too far behind, skipping %d frames\n", 
-                            (int)(frame_post_tail-frame_post_head-MAX_FRAME_BEHIND));
+                    WARN("too far behind, skipping %d frames\n", 
+                         (int)(frame_post_tail-frame_post_head-MAX_FRAME_BEHIND));
                     frame_post_head = frame_post_tail - MAX_FRAME_BEHIND;
                 }
 
@@ -415,8 +415,8 @@ void * wc_svc_webcam(void * cx)
 
                 // if frame count is less than the last then skip
                 if (f.count <= frame_count_last) {
-                    WARNING("frame_count has gone backward, curr=%"PRId64" last=%"PRId64"\n", 
-                            f.count, frame_count_last);
+                    WARN("frame_count has gone backward, curr=%"PRId64" last=%"PRId64"\n", 
+                         f.count, frame_count_last);
                     frame_post_head++;
                     continue;
                 }
@@ -624,7 +624,7 @@ void * wc_svc_webcam(void * cx)
 
 done:
     p2p_disconnect(handle);
-    NOTICE("terminating\n");
+    INFO("terminating\n");
     return NULL;
 }
 
@@ -714,7 +714,7 @@ try_again:
         ERROR("ioctl VIDIOC_G_FMT %s\n", strerror(errno));
         goto try_again;
     }
-    NOTICE("setting resolution to %dx%d\n", WIDTH(resolution), HEIGHT(resolution));
+    INFO("setting resolution to %dx%d\n", WIDTH(resolution), HEIGHT(resolution));
     format.fmt.pix.pixelformat = V4L2_PIX_FMT_MJPEG;
     format.fmt.pix.width  =  WIDTH(resolution);
     format.fmt.pix.height =  HEIGHT(resolution);
@@ -737,7 +737,7 @@ try_again:
     crop.c = cropcap.defrect;
     if (ioctl(cam_fd, VIDIOC_S_CROP, &crop) < 0) {
         if (errno == EINVAL || errno == ENOTTY) {
-            NOTICE("crop not supported\n");
+            INFO("crop not supported\n");
         } else {
             ERROR("ioctl VIDIOC_S_CROP, %s\n", strerror(errno));
             goto try_again;
@@ -813,7 +813,7 @@ try_again:
     }
 
     // return success
-    NOTICE("success\n");
+    INFO("success\n");
     cam_status = STATUS_INFO_OK;
 }
 
@@ -1043,19 +1043,19 @@ int cam_compare_jpeg(uint8_t * jpeg, uint32_t jpeg_size, uint64_t time_us, bool 
 #if 0
         // print the box, ...
         if (motion_detected) {
-            NOTICE("--------------------------------------------------\n");
+            INFO("--------------------------------------------------\n");
             for (box_y = 0; box_y < MAX_BOX_Y; box_y++) {
-                NOTICE("%4d %4d %4d %4d %4d %4d %4d %4d \n",
+                INFO("%4d %4d %4d %4d %4d %4d %4d %4d \n",
                        box[box_y][0], box[box_y][1], box[box_y][2], box[box_y][3],
                        box[box_y][4], box[box_y][5], box[box_y][6], box[box_y][7]);
             }
-            NOTICE("width=%d height=%d box_w=%d box_h=%d\n",
+            INFO("width=%d height=%d box_w=%d box_h=%d\n",
                    width, height, box_w, box_h);
-            NOTICE("MOTION_DETECTED - box10cnt=%d box5cnt=%d box3cnt=%d\n", 
+            INFO("MOTION_DETECTED - box10cnt=%d box5cnt=%d box3cnt=%d\n", 
                    box10cnt, box5cnt, box3cnt);
         }
         if (brightness_change_detected) {
-            NOTICE("BRIGHTNESS_CHANGE_DETECTED: brightness_diff=%.1f\n",
+            INFO("BRIGHTNESS_CHANGE_DETECTED: brightness_diff=%.1f\n",
                    brightness_diff);
         }
 #endif
@@ -1257,7 +1257,7 @@ int rp_open_file(void)
     if (rp_fd > 0) {
         ret = rp_read_and_verify_file_hdr();
         if (ret == 0) {
-            NOTICE("using existing file %s, size=%"PRId64"\n", RP_FILE_NAME, rp_file_size);
+            INFO("using existing file %s, size=%"PRId64"\n", RP_FILE_NAME, rp_file_size);
             return 0;
         }
         close(rp_fd);
@@ -1312,7 +1312,7 @@ int rp_open_file(void)
     }
 
     // return success
-    NOTICE("created new file %s, size=%"PRId64"\n", RP_FILE_NAME, rp_file_size);
+    INFO("created new file %s, size=%"PRId64"\n", RP_FILE_NAME, rp_file_size);
     return 0;
 }
 
@@ -1320,7 +1320,7 @@ void rp_close_file(void)
 {
     // sync and close file
     if (rp_fd > 0) {
-        NOTICE("syncing and closing\n");
+        INFO("syncing and closing\n");
         fsync(rp_fd);
         close(rp_fd);
     }
@@ -1340,7 +1340,7 @@ void * rp_toc_init_thread(void * cx)
     char           ts1[MAX_TIME_STR], ts2[MAX_TIME_STR];
 
     // starting notice
-    NOTICE("starting\n");
+    INFO("starting\n");
 
     frame_file_offset       = (uint64_t)(uintptr_t)cx * 32;
     last_frame_real_time_us = -1;
@@ -1351,19 +1351,19 @@ void * rp_toc_init_thread(void * cx)
     while (true) {
         // if frame_file_offset is 0 then we've progressed back to beyond the 1st frame
         if (frame_file_offset == 0) {
-            NOTICE("terminating because no more frames\n");
+            INFO("terminating because no more frames\n");
             break;
         }
 
         // read and verify frame hdr
         if (rp_read_frame_by_file_offset(frame_file_offset, &rpfh, NULL, &status) < 0) {
-            NOTICE("terminating becasue read frame failed\n");
+            INFO("terminating becasue read frame failed\n");
             break;
         }
 
         // if frame time is not less than our last frame then done
         if (rpfh.real_time_us >= last_frame_real_time_us) {
-            NOTICE("terminating becasue frame real time has increased, last=%s.%3.3d curr=%s.%3.3d\n",
+            INFO("terminating becasue frame real time has increased, last=%s.%3.3d curr=%s.%3.3d\n",
                    time2str(ts1, last_frame_real_time_us/1000000, false),
                    (int)((last_frame_real_time_us%1000000)/1000),
                    time2str(ts2, rpfh.real_time_us/1000000, false),
@@ -1375,14 +1375,14 @@ void * rp_toc_init_thread(void * cx)
         // if getting too close to the new toc entries being added by the
         // rp_write_file_frame_thread then we're done
         if (idx <= rp_toc_idx_next + 100) {
-            NOTICE("terminating becasue idx too close %d %d\n", idx, rp_toc_idx_next);
+            INFO("terminating becasue idx too close %d %d\n", idx, rp_toc_idx_next);
             break;
         }
 
         // if getting too close to the new file data being added by the
         // rp_write_file_frame_thread then we're done
         if (rp_file_size - RP_FILE_LENGTH(frame_file_offset) < RP_MIN_FILE_FREE_SIZE) {
-            NOTICE("terminating becasue close to file wrap, file_len=%"PRId64"\n",
+            INFO("terminating becasue close to file wrap, file_len=%"PRId64"\n",
                    RP_FILE_LENGTH(frame_file_offset));
             break;
         }
@@ -1405,15 +1405,15 @@ void * rp_toc_init_thread(void * cx)
     }
 
     // print notice
-    NOTICE("initialized %d toc entries\n", toc_init_count);
+    INFO("initialized %d toc entries\n", toc_init_count);
     if (toc_init_count > 0) {
-        NOTICE("    %s  ->  %s\n",
-               time2str(ts1, rp_toc[RP_MAX_TOC-toc_init_count].real_time_us/1000000, false),
-               time2str(ts2, rp_toc[RP_MAX_TOC-1].real_time_us/1000000, false));
+        INFO("    %s  ->  %s\n",
+             time2str(ts1, rp_toc[RP_MAX_TOC-toc_init_count].real_time_us/1000000, false),
+             time2str(ts2, rp_toc[RP_MAX_TOC-1].real_time_us/1000000, false));
     }
 
     // thread exit
-    NOTICE("terminating\n");
+    INFO("terminating\n");
     return NULL;
 }
 
@@ -1432,7 +1432,7 @@ void * rp_write_file_frame_thread(void * cx)
     int       ret, loop_count;
 
     // starting notice
-    NOTICE("starting\n");
+    INFO("starting\n");
 
     // init
     pthread_detach(pthread_self());
@@ -1473,9 +1473,9 @@ void * rp_write_file_frame_thread(void * cx)
         {
             this_frame_real_time_us = rp_file_hdr.last_frame_valid_through_real_time_us+1;
             if (this_frame_real_time_us > last_frame_written_real_time_us) {
-                NOTICE("writing gap frame  time=%s.%6.6d\n",
-                       time2str(ts1, this_frame_real_time_us / 1000000, false),
-                       (int)(this_frame_real_time_us % 1000000));
+                INFO("writing gap frame  time=%s.%6.6d\n",
+                     time2str(ts1, this_frame_real_time_us / 1000000, false),
+                     (int)(this_frame_real_time_us % 1000000));
                 ret = rp_write_frame(this_frame_real_time_us, NULL, 0, false);
                 if (ret < 0) {
                     ERROR("failed to write gap frame\n");
@@ -1511,8 +1511,8 @@ void * rp_write_file_frame_thread(void * cx)
 
             // if we are too far behind then skip frames
             if (frame_post_tail - frame_post_head > MAX_FRAME_BEHIND) {
-                WARNING("too far behind, skipping %d frames\n",
-                        (int)(frame_post_tail-frame_post_head-MAX_FRAME_BEHIND));
+                WARN("too far behind, skipping %d frames\n",
+                     (int)(frame_post_tail-frame_post_head-MAX_FRAME_BEHIND));
                 frame_post_head = frame_post_tail - MAX_FRAME_BEHIND;
             }
 
@@ -1602,7 +1602,7 @@ skip:
 
 error:
     // thread exit
-    NOTICE("terminating\n");
+    INFO("terminating\n");
     return NULL;
 }
 
@@ -1664,13 +1664,13 @@ int rp_read_and_verify_file_hdr(void)
 
     // if hdr_0 and hdr_1 are both valid then choose the one with higher update_counter
     if (hdr_valid[0] && hdr_valid[1]) {
-        NOTICE("both valid, update_counter = %"PRId64" %"PRId64"\n", hdr[0].update_counter, hdr[1].update_counter);
+        INFO("both valid, update_counter = %"PRId64" %"PRId64"\n", hdr[0].update_counter, hdr[1].update_counter);
         if (hdr[0].update_counter >= hdr[1].update_counter) {
-            NOTICE("choose hdr 0\n");
+            INFO("choose hdr 0\n");
             rp_file_hdr = hdr[0];
             rp_file_hdr_last = 0;
         } else {
-            NOTICE("choose hdr 1\n");
+            INFO("choose hdr 1\n");
             rp_file_hdr = hdr[1];
             rp_file_hdr_last = 1;
         }
@@ -1679,13 +1679,13 @@ int rp_read_and_verify_file_hdr(void)
 
     // if hdr_0 is valid or hdr_1 is valid then return the valid hdr
     if (hdr_valid[0]) {
-        NOTICE("one hdr valid, choose 0\n");
+        INFO("one hdr valid, choose 0\n");
         rp_file_hdr = hdr[0];
         rp_file_hdr_last = 0;
         return 0;
     }
     if (hdr_valid[1]) {
-        NOTICE("one hdr valid, choose 1\n");
+        INFO("one hdr valid, choose 1\n");
         rp_file_hdr = hdr[1];
         rp_file_hdr_last = 1;
         return 0;

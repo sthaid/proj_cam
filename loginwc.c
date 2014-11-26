@@ -36,7 +36,7 @@ int main(int argc, char **argv)
     rl.rlim_max = RLIM_INFINITY;
     rc = setrlimit(RLIMIT_CORE, &rl);
     if (rc < 0) {
-        WARNING("setrlimit for core dump, %s\n", strerror(errno));
+        WARN("setrlimit for core dump, %s\n", strerror(errno));
     }
 
     // get user_name and password from environment
@@ -67,10 +67,10 @@ int main(int argc, char **argv)
 
     // verify args
     if ((user_name == NULL) || (password == NULL) || (argc-optind != 1)) {
-        NOTICE("usage: loginwc <wc_name>\n");
-        NOTICE("  -P: use http proxy server\n");
-        NOTICE("  -u <user_name>: override WC_USER_NAME environment value\n");
-        NOTICE("  -p <password>: override WC_PASSWORD environment value\n");
+        PRINTF("usage: loginwc <wc_name>\n");
+        PRINTF("  -P: use http proxy server\n");
+        PRINTF("  -u <user_name>: override WC_USER_NAME environment value\n");
+        PRINTF("  -p <password>: override WC_PASSWORD environment value\n");
         return 1;
     }
     wc_name = argv[optind];

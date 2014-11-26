@@ -29,7 +29,7 @@ int main(int argc, char **argv)
     rl.rlim_max = RLIM_INFINITY;
     ret = setrlimit(RLIMIT_CORE, &rl);
     if (ret < 0) {
-        WARNING("setrlimit for core dump, %s\n", strerror(errno));
+        WARN("setrlimit for core dump, %s\n", strerror(errno));
     }
 
     // get user_name and password from environment
@@ -56,9 +56,9 @@ int main(int argc, char **argv)
 
     // verify user_name, password, and args
     if ((user_name == NULL) || (password == NULL) || (argc-optind != 0)) {
-        NOTICE("usage: wc_nettest_server\n");
-        NOTICE("  -u <user_name>: override WC_USER_NAME environment value\n");
-        NOTICE("  -p <password>: override WC_PASSWORD environment value\n");
+        PRINTF("usage: wc_nettest_server\n");
+        PRINTF("  -u <user_name>: override WC_USER_NAME environment value\n");
+        PRINTF("  -p <password>: override WC_PASSWORD environment value\n");
         return 1;
     }
 
@@ -84,10 +84,10 @@ void nettest_to_server(char * user_name, char * password)
     }
 
     // log starting notice
-    NOTICE("Starting network speed test to %s\n", CLOUD_SERVER_HOSTNAME);
-    NOTICE("\n");
-    NOTICE("ClientToServer    ServerToClient\n");
-    NOTICE("  (Mbit/Sec)        (Mbit/Sec)  \n");
+    PRINTF("Starting network speed test to %s\n", CLOUD_SERVER_HOSTNAME);
+    PRINTF("\n");
+    PRINTF("ClientToServer    ServerToClient\n");
+    PRINTF("  (Mbit/Sec)        (Mbit/Sec)  \n");
 
     // init buff 
     bzero(buff,sizeof(buff));
@@ -129,9 +129,9 @@ void nettest_to_server(char * user_name, char * password)
         }
 
         // print result 
-        NOTICE("%10d        %10d\n",
-                (int)((8 * sizeof(buff)) / (end1 - start1)),
-                (int)((8 * sizeof(buff)) / (end2 - start2)));
+        PRINTF("%10d        %10d\n",
+             (int)((8 * sizeof(buff)) / (end1 - start1)),
+             (int)((8 * sizeof(buff)) / (end2 - start2)));
     }
 }
 

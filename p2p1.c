@@ -58,7 +58,7 @@
                 pthread_cond_signal(&(con)->recv_data_avail_cond); \
             } \
             (con)->state = (new_state); \
-            NOTICE("%"PRId64" is now %s\n", (con)->con_id, CON_STATE_STR((con)->state)); \
+            INFO("%"PRId64" is now %s\n", (con)->con_id, CON_STATE_STR((con)->state)); \
         } \
     } while (0)
 
@@ -221,9 +221,9 @@ int p2p1_connect(char * user_name, char * password, char * wc_name, int service)
         ERROR("failed to get address of %s\n",  CLOUD_SERVER_HOSTNAME);
         return -1;
     }
-    NOTICE("address of %s is %s\n",
-          CLOUD_SERVER_HOSTNAME, 
-          sock_addr_to_str(s, sizeof(s), (struct sockaddr*)&cloud_server_addr));
+    INFO("address of %s is %s\n",
+         CLOUD_SERVER_HOSTNAME, 
+         sock_addr_to_str(s, sizeof(s), (struct sockaddr*)&cloud_server_addr));
 
     // create socket 
     sfd = socket(AF_INET, SOCK_DGRAM|SOCK_CLOEXEC, IPPROTO_UDP);
@@ -378,15 +378,15 @@ int p2p1_accept(char * wc_macaddr, int * service, char * user_name)
     while (true) {
         ret = getsockaddr(CLOUD_SERVER_HOSTNAME, CLOUD_SERVER_DGRAM_PORT, SOCK_DGRAM, IPPROTO_UDP, &cloud_server_addr);
         if (ret < 0) {
-            WARNING("failed to get address of %s, retry in 1 minute\n", CLOUD_SERVER_HOSTNAME);
+            WARN("failed to get address of %s, retry in 1 minute\n", CLOUD_SERVER_HOSTNAME);
             sleep(60);
             continue;
         }
 
         time_last_getsockaddr_ms = MILLISEC_TIMER;
-        NOTICE("address of %s is %s\n", 
-               CLOUD_SERVER_HOSTNAME, 
-               sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&cloud_server_addr));
+        INFO("address of %s is %s\n", 
+             CLOUD_SERVER_HOSTNAME, 
+             sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&cloud_server_addr));
         break;
     }
 
@@ -397,9 +397,9 @@ int p2p1_accept(char * wc_macaddr, int * service, char * user_name)
             ret = getsockaddr(CLOUD_SERVER_HOSTNAME, CLOUD_SERVER_DGRAM_PORT, SOCK_DGRAM, IPPROTO_UDP, &new_cloud_server_addr);
             if (ret == 0 && memcmp(&new_cloud_server_addr, &cloud_server_addr, sizeof(struct sockaddr_in)) != 0) {
                 cloud_server_addr = new_cloud_server_addr;
-                NOTICE("address of %s has changed to %s\n", 
-                       CLOUD_SERVER_HOSTNAME, 
-                       sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&cloud_server_addr));
+                INFO("address of %s has changed to %s\n", 
+                     CLOUD_SERVER_HOSTNAME, 
+                     sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&cloud_server_addr));
             }
         }
 
@@ -501,8 +501,8 @@ int connect_common(int sfd, struct sockaddr_in * peer_addr, uint64_t con_id)
     static bool                   first_call = true;
 
     // initial prints
-    NOTICE("%"PRId64" connecting to peer %s\n",
-           con_id, sock_addr_to_str(s,sizeof(s),(struct sockaddr*)peer_addr));
+    INFO("%"PRId64" connecting to peer %s\n",
+         con_id, sock_addr_to_str(s,sizeof(s),(struct sockaddr*)peer_addr));
     DEBUG("sock options %s\n", sock_to_options_str(sfd, s, sizeof(s)));
 
     // verify con_id is not zero
@@ -1650,11 +1650,11 @@ void * monitor_thread(void * cx)
 
         // print header
         if ((print_header_count++ % 10) == 0) {
-            NOTICE("\n");
-            NOTICE("                                                Peer  Peer  \n");
-            NOTICE("            Sent  Recvd Sent  Recvd Resnd RcvDp Resnd RcvDp \n");
-            NOTICE("Send  Recv  Data  Data  Ack   Ack   Data  Data  Data  Data  \n");
-            NOTICE("Mb/S  Mb/S  Dgram Dgram Dgram Dgram Dgram Dgram Dgram Dgram \n");
+            INFO("\n");
+            INFO("                                                Peer  Peer  \n");
+            INFO("            Sent  Recvd Sent  Recvd Resnd RcvDp Resnd RcvDp \n");
+            INFO("Send  Recv  Data  Data  Ack   Ack   Data  Data  Data  Data  \n");
+            INFO("Mb/S  Mb/S  Dgram Dgram Dgram Dgram Dgram Dgram Dgram Dgram \n");
         }
 
         // sleep for caller's desired interval
@@ -1666,17 +1666,17 @@ void * monitor_thread(void * cx)
 
         // print changes since stats_last
         interval_ms = stats_time_ms - stats_last_time_ms;
-        NOTICE("%5.1f %5.1f %5d %5d %5d %5d %5d %5d %5d %5d\n",
-               (double)DELTA(sent_bytes) * 8 / (interval_ms * 1000),
-               (double)DELTA(recvd_bytes) * 8 / (interval_ms * 1000),
-               (int)DELTA(sent_data_dgrams),
-               (int)DELTA(recvd_data_dgrams),
-               (int)DELTA(sent_acks),
-               (int)DELTA(recvd_acks),
-               (int)DELTA(resent_data_dgrams),
-               (int)DELTA(recvd_duplicates),
-               (int)DELTA(peer_resent_data_dgrams),
-               (int)DELTA(peer_recvd_duplicates));
+        INFO("%5.1f %5.1f %5d %5d %5d %5d %5d %5d %5d %5d\n",
+             (double)DELTA(sent_bytes) * 8 / (interval_ms * 1000),
+             (double)DELTA(recvd_bytes) * 8 / (interval_ms * 1000),
+             (int)DELTA(sent_data_dgrams),
+             (int)DELTA(recvd_data_dgrams),
+             (int)DELTA(sent_acks),
+             (int)DELTA(recvd_acks),
+             (int)DELTA(resent_data_dgrams),
+             (int)DELTA(recvd_duplicates),
+             (int)DELTA(peer_resent_data_dgrams),
+             (int)DELTA(peer_recvd_duplicates));
 
         // save stats in stats_last
         stats_last = stats;
@@ -2006,7 +2006,7 @@ void p2p1_debug_con(int handle)
         char peer_addr_str[100];
         int i;
 
-        printf("    HANDLE   CON_ID        STATE            PEER_ADDR\n");
+        PRINTF("    HANDLE   CON_ID        STATE            PEER_ADDR\n");
 
         pthread_mutex_lock(&connect_mutex);
         for (i = 0; i < MAX_CON; i++) {
@@ -2014,7 +2014,7 @@ void p2p1_debug_con(int handle)
             if (con == NULL) {
                 continue;
             }
-            printf("%8d %8"PRId64" %20s %15s\n",
+            PRINTF("%8d %8"PRId64" %20s %15s\n",
                    con_handle[i],
                    con->con_id, 
                    CON_STATE_STR(con->state),
@@ -2044,65 +2044,65 @@ void p2p1_debug_con(int handle)
 
     // print con
     time_ms = MILLISEC_TIMER;
-    printf("handle=%d con_id=%"PRId64" state=%s peer_addr=%s sfd=%d\n",
+    PRINTF("handle=%d con_id=%"PRId64" state=%s peer_addr=%s sfd=%d\n",
            handle,
            con->con_id, 
            CON_STATE_STR(con->state),
            sock_addr_to_str(peer_addr_str, sizeof(peer_addr_str), (struct sockaddr *)&con->peer_addr),
            con->sfd);
-    printf("time (ms) since:  last_dgram_recvd=%"PRId64" last_stats_dgram_sent=%"PRId64"\n",
+    PRINTF("time (ms) since:  last_dgram_recvd=%"PRId64" last_stats_dgram_sent=%"PRId64"\n",
            time_ms - con->time_last_dgram_recvd_ms,
            time_ms - con->time_last_stats_dgram_sent_ms);
-    printf("con_resp_recvd=%d send_in_prog=%d recv_in_prog=%d\n",
+    PRINTF("con_resp_recvd=%d send_in_prog=%d recv_in_prog=%d\n",
            con->con_resp_recvd,
            con->send_in_prog,
            con->recv_in_prog);
-    printf("send_offset=%"PRId64" remote_recvbuff_offset=%"PRId64"\n",
+    PRINTF("send_offset=%"PRId64" remote_recvbuff_offset=%"PRId64"\n",
            con->send_offset,
            con->remote_recvbuff_offset);
-    printf("list_length:  data_dgram_free_list=%d data_dgram_send_list=%d data_dgram_waiting_for_ack_list=%d\n",
+    PRINTF("list_length:  data_dgram_free_list=%d data_dgram_send_list=%d data_dgram_waiting_for_ack_list=%d\n",
            TAILQ_LENGTH(data_dgram_entry_s, &con->data_dgram_free_list_head, entries),
            TAILQ_LENGTH(data_dgram_entry_s, &con->data_dgram_send_list_head, entries),
            TAILQ_LENGTH(data_dgram_entry_s, &con->data_dgram_waiting_for_ack_list_head, entries));
-    printf("num_data_dgrams_on_waiting_for_ack_list=%d\n",
+    PRINTF("num_data_dgrams_on_waiting_for_ack_list=%d\n",
            con->num_data_dgrams_on_waiting_for_ack_list);
-    printf("recvbuff_data_valid_lst: ...\n");
+    PRINTF("recvbuff_data_valid_lst: ...\n");
     TAILQ_FOREACH(dve, &con->recvbuff_data_valid_list_head, entries) {
-        printf("    %10"PRId64"  %10"PRId64"\n", 
+        PRINTF("    %10"PRId64"  %10"PRId64"\n", 
                dve->offset, dve->length);
     }
-    printf("recv_eod_offset=%"PRId64" recv_cond_wait_len=%d\n",
+    PRINTF("recv_eod_offset=%"PRId64" recv_cond_wait_len=%d\n",
            con->recv_eod_offset,
            con->recv_cond_wait_len);
     #if MAX_ACK != 10
     #error "max_ack"
     #endif
-    printf("ack=%d %d %d %d %d %d %d %d %d %d \n",
+    PRINTF("ack=%d %d %d %d %d %d %d %d %d %d \n",
            con->ack[0], con->ack[1], con->ack[2], con->ack[3], con->ack[4],
            con->ack[5], con->ack[6], con->ack[7], con->ack[8], con->ack[9]);
-    printf("ack_tail=%d ack_unsent_count=%d time-since-oldest-unsent-ack=%d ms\n",
+    PRINTF("ack_tail=%d ack_unsent_count=%d time-since-oldest-unsent-ack=%d ms\n",
            con->ack_tail,
            con->ack_unsent_count,
            (con->ack_oldest_unsent_time_ms == 0 
             ? 99999999
             : (uint32_t)(time_ms - con->ack_oldest_unsent_time_ms)));
-    printf("last_sent_local_recvbuff_offset=%"PRId64"\n",
+    PRINTF("last_sent_local_recvbuff_offset=%"PRId64"\n",
             con->last_sent_local_recvbuff_offset);
-    printf("monitor_secs=%d\n",
+    PRINTF("monitor_secs=%d\n",
             con->monitor_secs);
-    printf("stats: sent_bytes=%"PRId64" recvd_bytes=%"PRId64
+    PRINTF("stats: sent_bytes=%"PRId64" recvd_bytes=%"PRId64
                  " sent_data_dgrams=%"PRId64" recvd_data_dgrams=%"PRId64"\n",
             con->stats.sent_bytes, 
             con->stats.recvd_bytes, 
             con->stats.sent_data_dgrams, 
             con->stats.recvd_data_dgrams);
-    printf("stats: sent_acks=%"PRId64" recvd_acks=%"PRId64
+    PRINTF("stats: sent_acks=%"PRId64" recvd_acks=%"PRId64
                  " resent_data_dgrams=%"PRId64" recvd_duplicates=%"PRId64"\n",
             con->stats.sent_acks, 
             con->stats.recvd_acks, 
             con->stats.resent_data_dgrams, 
             con->stats.recvd_duplicates);
-    printf("stats: peer_resent_data_dgrams=%"PRId64" peer_recvd_duplicates=%"PRId64"\n",
+    PRINTF("stats: peer_resent_data_dgrams=%"PRId64" peer_recvd_duplicates=%"PRId64"\n",
             con->stats.peer_resent_data_dgrams, 
             con->stats.peer_recvd_duplicates);
 

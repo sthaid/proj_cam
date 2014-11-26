@@ -20,7 +20,9 @@
 #include <fcntl.h>
 #include <time.h>
 #include <signal.h>
+#ifndef ANDROID  //XXX
 #include <ifaddrs.h>
+#endif
 #include <termios.h>
 #include <assert.h>
 #include <inttypes.h>
@@ -453,13 +455,13 @@ typedef struct {
 
 // -----------------  UTILS  ---------------------------------------------------------
 
-#define NOTICE(fmt, args...) \
+#define INFO(fmt, args...) \
     do { \
-        logmsg("NOTICE", __func__, fmt, ## args); \
+        logmsg("INFO", __func__, fmt, ## args); \
     } while (0)
-#define WARNING(fmt, args...) \
+#define WARN(fmt, args...) \
     do { \
-        logmsg("WARNING", __func__, fmt, ## args); \
+        logmsg("WARN", __func__, fmt, ## args); \
     } while (0)
 #define ERROR(fmt, args...) \
     do { \
@@ -479,6 +481,11 @@ typedef struct {
   #define DEBUG(fmt, args...) 
 #endif
 
+#define PRINTF(fmt, args...) \
+    do { \
+        printmsg(fmt, ## args); \
+    } while (0)
+
 #define MAX_LOGMSG_FILE_SIZE 0x100000
 
 #define TIMESPEC_TO_US(ts) ((uint64_t)(ts)->tv_sec * 1000000 + (ts)->tv_nsec / 1000)
@@ -495,6 +502,7 @@ char * sock_addr_to_str(char * s, int slen, struct sockaddr * addr);
 int getmacaddr(char * macaddr_str);
 void logmsg_init(char * logmsg_file);
 void logmsg(char * lvl, const char * func, char * fmt, ...) __attribute__ ((format (printf, 3, 4)));
+void printmsg(char *fmt, ...);
 void convert_yuy2_to_rgb(uint8_t * yuy2, uint8_t * rgb, int pixels);
 void convert_yuy2_to_gs(uint8_t * yuy2, uint8_t * gs, int pixels);
 uint64_t microsec_timer(void);

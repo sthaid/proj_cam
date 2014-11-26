@@ -88,7 +88,7 @@ void * wc_svc_nettest(void * cx)
 
             // set new value of nt.send_bytes
             nt->send_bytes = msg->val1;
-            NOTICE("nettest send datalen is now %d\n", nt->send_bytes);
+            INFO("nettest send datalen is now %d\n", nt->send_bytes);
 
             // send response
             msg_response.msg_type = NT_MSG_TYPE_RESPONSE;
@@ -104,7 +104,7 @@ void * wc_svc_nettest(void * cx)
             break;
         case NT_MSG_TYPE_REQUEST_EXIT:
             // issue notice
-            NOTICE("nettest exit request received\n");
+            INFO("nettest exit request received\n");
 
             // send response
             msg_response.msg_type = NT_MSG_TYPE_RESPONSE;
@@ -149,7 +149,7 @@ done:
     }
     
     // exit thread
-    NOTICE("nettest complete\n");
+    INFO("nettest complete\n");
     return NULL;
 }
 
@@ -193,6 +193,6 @@ void * send_thread(void * cx)
     free(msg);
 
     // exit thread
-    NOTICE("send_thread exitted\n");
+    INFO("send_thread exitted\n");
     return NULL;
 }

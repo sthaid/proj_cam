@@ -315,9 +315,9 @@ static void * monitor_thread(void * cx)
 
         // print header
         if ((print_header_count++ % 10) == 0) {
-            NOTICE("\n");
-            NOTICE("Send  Recv\n");
-            NOTICE("Mb/S  Mb/S\n");
+            INFO("\n");
+            INFO("Send  Recv\n");
+            INFO("Mb/S  Mb/S\n");
         }
 
         // sleep for caller's desired interval
@@ -329,8 +329,8 @@ static void * monitor_thread(void * cx)
 
         // print changes since stats_last
         interval_ms = stats_time_ms - stats_last_time_ms;
-        NOTICE("%5.1f %5.1f\n",
-               (double)DELTA(sent_bytes) * 8 / (interval_ms * 1000),
+        INFO("%5.1f %5.1f\n",
+             (double)DELTA(sent_bytes) * 8 / (interval_ms * 1000),
                (double)DELTA(recvd_bytes) * 8 / (interval_ms * 1000));
 
         // save stats in stats_last
@@ -344,7 +344,7 @@ static void * monitor_thread(void * cx)
 
 static void p2p2_debug_con(int handle)
 {
-    NOTICE("p2p2_debug_con is not supported\n");
+    INFO("p2p2_debug_con is not supported\n");
 }
 
 static void sleep_ms(int ms)

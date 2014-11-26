@@ -36,7 +36,7 @@ int main(int argc, char **argv)
     rl.rlim_max = RLIM_INFINITY;
     ret = setrlimit(RLIMIT_CORE, &rl);
     if (ret < 0) {
-        WARNING("setrlimit for core dump, %s\n", strerror(errno));
+        WARN("setrlimit for core dump, %s\n", strerror(errno));
     }
 
     // get user_name and password from environment
@@ -66,10 +66,10 @@ int main(int argc, char **argv)
 
     // verify user_name, password, and args
     if ((user_name == NULL) || (password == NULL) || (argc-optind != 0)) {
-        NOTICE("usage: wc_admin\n");
-        NOTICE("  -c: create account\n");
-        NOTICE("  -u <user_name>: override WC_USER_NAME environment value\n");
-        NOTICE("  -p <password>: override WC_PASSWORD environment value\n");
+        PRINTF("usage: wc_admin\n");
+        PRINTF("  -c: create account\n");
+        PRINTF("  -u <user_name>: override WC_USER_NAME environment value\n");
+        PRINTF("  -p <password>: override WC_PASSWORD environment value\n");
         return 1;
     }
 
@@ -102,7 +102,7 @@ int main(int argc, char **argv)
     }
 
     // return
-    printf("\n");
+    PRINTF("\n");
     return 0;
 }
 

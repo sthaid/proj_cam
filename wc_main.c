@@ -69,7 +69,7 @@ int main(int argc, char **argv)
     rl.rlim_max = RLIM_INFINITY;
     ret = setrlimit(RLIMIT_CORE, &rl);
     if (ret < 0) {
-        WARNING("setrlimit for core dump\n");
+        WARN("setrlimit for core dump\n");
     }
 
     // parse options
@@ -95,7 +95,7 @@ int main(int argc, char **argv)
     if (ret < 0) {
         FATAL("unable to read wc_macaddr\n");
     }
-    NOTICE("wc_macaddr: %s\n", wc_macaddr);
+    INFO("wc_macaddr: %s\n", wc_macaddr);
 
     // init thread attribute for creating threads detached
     pthread_attr_init(&thread_attr);
@@ -148,7 +148,7 @@ int main(int argc, char **argv)
         }
 
         // create the service thread 
-        NOTICE("starting service %s for user %s\n", service_tbl[i].name, user_name);
+        INFO("starting service %s for user %s\n", service_tbl[i].name, user_name);
         pthread_create(&thread, &thread_attr, service_tbl[i].service_proc, (void*)(long)handle);
     }
 
@@ -167,7 +167,7 @@ void * debug_thread(void * cx)
 
     while (true) {
         // print prompt and read cmd/args
-        printf("DEBUG> ");
+        PRINTF("DEBUG> ");
         if (getcl(&argc,argv) == false) {
             break;
         }
@@ -179,8 +179,8 @@ void * debug_thread(void * cx)
 
         // cmd: help
         if (strcmp(argv[0], "help") == 0) {
-            printf("p2p_debug_con [<handle>]\n");
-            printf("p2p_monitor_ctl <handle> <secs>\n");
+            PRINTF("p2p_debug_con [<handle>]\n");
+            PRINTF("p2p_monitor_ctl <handle> <secs>\n");
             continue;
         }
 
@@ -191,7 +191,7 @@ void * debug_thread(void * cx)
             if (argc == 1) {
                 handle = -1;
             } else if (sscanf(argv[1], "%d", &handle) != 1) {
-                printf("usage: p2p_debug_con [<handle>]\n");
+                PRINTF("usage: p2p_debug_con [<handle>]\n");
                 continue;
             }
             p2p_debug_con(handle);
@@ -206,7 +206,7 @@ void * debug_thread(void * cx)
                 sscanf(argv[1], "%d", &handle) != 1 ||
                 sscanf(argv[2], "%d", &secs) != 1)
             {
-                printf("usage: p2p_monitor_ctl <handle> <secs>\n");
+                PRINTF("usage: p2p_monitor_ctl <handle> <secs>\n");
                 continue;
             }
             p2p_monitor_ctl(handle, secs);
@@ -214,7 +214,7 @@ void * debug_thread(void * cx)
         }
     }
 
-    NOTICE("program terminating\n");
+    INFO("program terminating\n");
     exit(0);
 }
 

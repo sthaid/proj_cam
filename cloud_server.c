@@ -121,7 +121,7 @@ int main(int argc, char ** argv)
     rl.rlim_max = RLIM_INFINITY;
     ret = setrlimit(RLIMIT_CORE, &rl);
     if (ret < 0) {
-        WARNING("setrlimit for core dump\n");
+        WARN("setrlimit for core dump\n");
     }
 
     // parse options
@@ -143,7 +143,7 @@ int main(int argc, char ** argv)
     logmsg_init(debug_mode == 0 ? "cloud_server.log" : "stderr");
 
     // call subsystem initialization routines
-    NOTICE("initializing\n");
+    INFO("initializing\n");
     account_init();
     dgram_init();
 
@@ -151,13 +151,13 @@ int main(int argc, char ** argv)
     pthread_create(&thread, NULL, service_accept_thread, NULL);
 
     // pause forever
-    NOTICE("startup complete\n");
+    INFO("startup complete\n");
     while (true) {
         pause();
     }
 
     // return;
-    NOTICE("shutdown\n");
+    INFO("shutdown\n");
     return 0;
 }
 
@@ -1188,7 +1188,7 @@ void * nettest_thread(void * cx)
     while (true) {
         len = recv(sockfd, buff, sizeof(buff), MSG_WAITALL);
         if (len == 0) {
-            NOTICE("nettest complete\n");
+            INFO("nettest complete\n");
             goto done;
         }
         if (len != sizeof(buff)) {
@@ -1414,7 +1414,7 @@ void * dgram_thread(void * cx)
                     max_onl_wc = idx + 1;
                 }
 
-                NOTICE("wc %s is now online, %s/%s\n",
+                INFO("wc %s is now online, %s/%s\n",
                        onl_wc[idx].wc_macaddr,
                        sock_addr_to_str(s1,sizeof(s1),(struct sockaddr*)&onl_wc[idx].wc_addr),
                        sock_addr_to_str(s2,sizeof(s2),(struct sockaddr*)&onl_wc[idx].wc_addr_behind_nat));
@@ -1434,7 +1434,7 @@ void * dgram_thread(void * cx)
             {
                 onl_wc[idx].wc_addr = *wc_addr;
                 onl_wc[idx].wc_addr_behind_nat = dgram_rcv.u.wc_announce.wc_addr_behind_nat;
-                NOTICE("wc %s has new address, %s/%s\n",
+                INFO("wc %s has new address, %s/%s\n",
                        onl_wc[idx].wc_macaddr,
                        sock_addr_to_str(s1,sizeof(s1),(struct sockaddr*)&onl_wc[idx].wc_addr),
                        sock_addr_to_str(s2,sizeof(s2),(struct sockaddr*)&onl_wc[idx].wc_addr_behind_nat));
@@ -1452,7 +1452,7 @@ void * dgram_thread(void * cx)
             char                 s1[100], s2[100];
 
             // debug print the connect request
-            NOTICE("recvd connect request from %s/%s user=%s wc_name=%s service=%s\n",
+            INFO("recvd connect request from %s/%s user=%s wc_name=%s service=%s\n",
                    sock_addr_to_str(s1,sizeof(s1),(struct sockaddr*)client_addr),
                    sock_addr_to_str(s2,sizeof(s2),(struct sockaddr*)&dgram_rcv.u.connect_req.client_addr_behind_nat),
                    dgram_rcv.u.connect_req.user_name,
@@ -1567,7 +1567,7 @@ void * dgram_monitor_onl_wc_thread(void * cx)
             // if haven't received announde in 5x the announce interval then 
             // remove this webcam from the onl_wc table
             if (curr_us - onl_wc[i].last_announce_rcv_time_us > 5 * P2P_ANNOUNCE_INTVL_US) {
-                NOTICE("wc %s is no longer online\n", onl_wc[i].wc_macaddr);
+                INFO("wc %s is no longer online\n", onl_wc[i].wc_macaddr);
                 bzero(&onl_wc[i], sizeof(onl_wc_t));
             }
         }

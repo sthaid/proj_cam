@@ -116,7 +116,7 @@ void * wc_svc_shell(void * cx)
     free(thread_cx);
 
     // done
-    NOTICE("shell exit\n");
+    INFO("shell exit\n");
     return NULL;
 }
     

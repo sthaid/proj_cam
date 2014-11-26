@@ -41,7 +41,7 @@ int main(int argc, char **argv)
     rl.rlim_max = RLIM_INFINITY;
     ret = setrlimit(RLIMIT_CORE, &rl);
     if (ret < 0) {
-        WARNING("setrlimit for core dump, %s\n", strerror(errno));
+        WARN("setrlimit for core dump, %s\n", strerror(errno));
     }
 
     // get user_name and password from environment
@@ -72,10 +72,10 @@ int main(int argc, char **argv)
 
     // verify args
     if ((user_name == NULL) || (password == NULL) || (argc-optind != 1)) {
-        NOTICE("usage: nettest_to_wc <wc_name>\n");
-        NOTICE("  -P: use http proxy server\n");
-        NOTICE("  -u <user_name>: override WC_USER_NAME environment value\n");
-        NOTICE("  -p <password>: override WC_PASSWORD environment value\n");
+        PRINTF("usage: nettest_to_wc <wc_name>\n");
+        PRINTF("  -P: use http proxy server\n");
+        PRINTF("  -u <user_name>: override WC_USER_NAME environment value\n");
+        PRINTF("  -p <password>: override WC_PASSWORD environment value\n");
         return 1;
     }
     wc_name = argv[optind];
@@ -103,11 +103,11 @@ void nettest_to_webcam(char * user_name, char * password, char * wc_name)
     }
 
     // log starting notice
-    NOTICE("Starting network speed test, webcam %s\n", wc_name);
+    PRINTF("Starting network speed test, webcam %s\n", wc_name);
     if (p2p == &p2p1) {
-        NOTICE("network data is being sent directly to the webcam.\n");
+        PRINTF("network data is being sent directly to the webcam.\n");
     } else {
-        NOTICE("network data is being sent to the webcam via server, port 80.\n");
+        PRINTF("network data is being sent to the webcam via server, port 80.\n");
     }
 
     // create threads
@@ -128,7 +128,7 @@ void nettest_to_webcam(char * user_name, char * password, char * wc_name)
         val = 0;
         cmd[0] = '\0';
         if (fgets(s, sizeof(s), stdin) == NULL) {
-            NOTICE("nettest is exitting\n");
+            PRINTF("nettest is exitting\n");
             goto normal_completion;
         }
         cnt = sscanf(s, "%s %d", cmd, &val);
@@ -151,7 +151,7 @@ void nettest_to_webcam(char * user_name, char * password, char * wc_name)
                 continue;
             }
             send_bytes = val;
-            NOTICE("nettest send datalen is now %d\n", send_bytes);
+            PRINTF("nettest send datalen is now %d\n", send_bytes);
         } else if (strcmp(cmd, "recv") == 0) {
             if (cnt < 2) {
                 val = NT_DEFAULT_SEND_OR_RECV_LEN;
@@ -164,16 +164,16 @@ void nettest_to_webcam(char * user_name, char * password, char * wc_name)
                 ERROR("failed to issue webcam send_data request, exitting nettest\n");
                 goto error_completion;
             }
-            NOTICE("nettest recv datalen is now %d\n", val);
+            PRINTF("nettest recv datalen is now %d\n", val);
         } else if (strcmp(cmd, "stop") == 0) {
             send_bytes = 0; 
             if (webcam_request(NT_MSG_TYPE_REQUEST_SEND_DATA, 0) == -1) {
                 ERROR("failed to issue webcam send_data request, exitting nettest\n");
                 goto error_completion;
             }
-            NOTICE("nettest send and recv are stopped\n");
+            PRINTF("nettest send and recv are stopped\n");
         } else if (strcmp(cmd, "exit") == 0) {
-            NOTICE("nettest is exitting\n");
+            PRINTF("nettest is exitting\n");
             goto normal_completion;
         } else {
             ERROR("invalid cmd '%s'\n", cmd);
@@ -202,7 +202,7 @@ error_completion:
     if (p2p_disconnect(handle) < 0) {
         ERROR("p2p_disconnect\n");
     }
-    NOTICE("nettest complete\n");
+    PRINTF("nettest complete\n");
 }
 
 void * send_thread(void * cx)
@@ -240,7 +240,7 @@ void * send_thread(void * cx)
     free(msg);
 
     // set send_thread_exitted flag
-    NOTICE("send_thread exitted\n");
+    PRINTF("send_thread exitted\n");
     send_thread_exitted = true;
     return NULL;
 }
@@ -296,7 +296,7 @@ done:
     free(msg);
 
     // set recv_thread_exitted flag, and exit this thread
-    NOTICE("recv_thread exitted\n");
+    PRINTF("recv_thread exitted\n");
     recv_thread_exitted = true;
     return NULL;
 }

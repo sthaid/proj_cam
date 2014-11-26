@@ -21,20 +21,20 @@
 #define WIN_HEIGHT_INITIAL          480
 #define CTL_WIDTH                   115
 
-#define STATE_NO_WC_ID_STR         0
+#define STATE_NO_WC_ID_STR          0
 #define STATE_CONNECTING            1
 #define STATE_CONNECTED             2
 #define STATE_CONNECTING_ERROR      3
 #define STATE_CONNECTED_ERROR       4
-#define STATE_FATAL_ERROR           5
+#define STATE_FATAL_ERROR          5
 
 #define STATE_STR(state) \
-   ((state) == STATE_NO_WC_ID_STR    ? "STATE_NO_WC_ID_STR"     : \
+   ((state) == STATE_NO_WC_ID_STR     ? "STATE_NO_WC_ID_STR"      : \
     (state) == STATE_CONNECTING       ? "STATE_CONNECTING"        : \
     (state) == STATE_CONNECTED        ? "STATE_CONNECTED"         : \
     (state) == STATE_CONNECTING_ERROR ? "STATE_CONNECTING_ERROR"  : \
     (state) == STATE_CONNECTED_ERROR  ? "STATE_CONNECTED_ERROR"   : \
-    (state) == STATE_FATAL_ERROR      ? "STATE_FATAL_ERROR"         \
+    (state) == STATE_FATAL_ERROR     ? "STATE_FATAL_ERROR"        \
                                       : "????")
 
 #define LONG_SLEEP_US               200000
@@ -359,7 +359,7 @@ int main(int argc, char **argv)
     rl.rlim_max = RLIM_INFINITY;
     ret = setrlimit(RLIMIT_CORE, &rl);
     if (ret < 0) {
-        WARNING("setrlimit for core dump, %s\n", strerror(errno));
+        WARN("setrlimit for core dump, %s\n", strerror(errno));
     }
 
     // get user_name and password from environment
@@ -404,13 +404,13 @@ int main(int argc, char **argv)
         (opt_zoom_str != NULL && (strlen(opt_zoom_str) != 1 || opt_zoom_str[0] < 'A' || opt_zoom_str[0] > 'D')) ||
         (argc-optind > MAX_WEBCAM)) 
     {
-        NOTICE("usage: viewer <user_name> <password> <wc_name> ...\n");
-        NOTICE("  -P: use http proxy server\n");
-        NOTICE("  -z <A|B|C|D>: sets zoom webcam\n");
-        NOTICE("  -d: enable debug\n");
-        NOTICE("  -u <user_name>: override WC_USER_NAME environment value\n");
-        NOTICE("  -p <password>: override WC_PASSWORD environment value\n");
-        NOTICE("  -Z: zulu time\n");
+        PRINTF("usage: viewer <user_name> <password> <wc_name> ...\n");
+        PRINTF("  -P: use http proxy server\n");
+        PRINTF("  -z <A|B|C|D>: sets zoom webcam\n");
+        PRINTF("  -d: enable debug\n");
+        PRINTF("  -u <user_name>: override WC_USER_NAME environment value\n");
+        PRINTF("  -p <password>: override WC_PASSWORD environment value\n");
+        PRINTF("  -Z: zulu time\n");
         return 1;
     }
     max_wc_name = 0;
@@ -501,7 +501,7 @@ int main(int argc, char **argv)
         usleep(SLEEP_US);
     }
     if (webcam_threads_running_count != 0) {
-        WARNING("webcam threads failed to terminate\n");
+        WARN("webcam threads failed to terminate\n");
     }
 
     // cancel the debug thread
@@ -811,7 +811,7 @@ void event_handler(void)
             {
                 SET_CTL_MODE_PLAYBACK_SPEED(speed);
             } else {
-                WARNING("speed '%s' is invalid\n", event.pb_speed_event_value_str);
+                WARN("speed '%s' is invalid\n", event.pb_speed_event_value_str);
             }
             event.pb_speed_event = false;
         }
@@ -936,7 +936,7 @@ void display_handler(void)
     // XXX what if the string is bigger?
     #define RENDER_TEXT(font, str, pos, ctl, centered) \
         do { \
-            NOTICE("RENDER_TEXT '%s'\n", str); \
+            INFO("RENDER_TEXT '%s'\n", str); \
             SDL_Surface *surface; \
             SDL_Texture *texture; \
             SDL_Color fg_color_normal = {255,255,255}; \
@@ -1563,8 +1563,8 @@ void * webcam_thread(void * cx)
 
     #define STATE_CHANGE(new_state, s1, s2, s3) \
         do { \
-            NOTICE("wc %c: %s -> %s '%s' '%s' %s\n", \
-                   id_char, STATE_STR(wc->state), STATE_STR(new_state), s1, s2, s3); \
+            INFO("wc %c: %s -> %s '%s' '%s' %s\n", \
+                 id_char, STATE_STR(wc->state), STATE_STR(new_state), s1, s2, s3); \
             wc->state = (new_state); \
             wc->last_state_change_time_us = microsec_timer(); \
             DISPLAY_TEXT(s1,s2,s3); \
@@ -1805,8 +1805,8 @@ void * webcam_thread(void * cx)
 
                 // if mode_id in received msg does not match our mode_id then discard
                 if (msg.u.mt_frame.mode_id != wc->mode.mode_id) {
-                    WARNING("wc %c: discarding frame msg because msg mode_id %"PRId64" is not expected %"PRId64"\n",
-                            id_char, msg.u.mt_frame.mode_id, wc->mode.mode_id);
+                    WARN("wc %c: discarding frame msg because msg mode_id %"PRId64" is not expected %"PRId64"\n",
+                         id_char, msg.u.mt_frame.mode_id, wc->mode.mode_id);
                     break;
                 }
 
@@ -1816,8 +1816,8 @@ void * webcam_thread(void * cx)
                 {
                     uint32_t status = (wc->mode.mode == MODE_LIVE ? wc->status.cam_status 
                                                                   : wc->status.rp_status);
-                    WARNING("wc %c: discarding frame msg because %s status is %s\n",
-                            id_char, MODE_STR(wc->mode.mode), STATUS_STR(status));
+                    WARN("wc %c: discarding frame msg because %s status is %s\n",
+                         id_char, MODE_STR(wc->mode.mode), STATUS_STR(status));
                     break;
                 }
 
@@ -1935,7 +1935,7 @@ void * debug_thread(void * cx)
     // loop until eof on debug input or thread cancelled
     while (true) {
         // print prompt and read cmd/args
-        printf("DEBUG> ");
+        PRINTF("DEBUG> ");
         if (getcl(&argc,argv) == false) {
             break;
         }
@@ -1947,8 +1947,8 @@ void * debug_thread(void * cx)
 
         // cmd: help
         if (strcmp(argv[0], "help") == 0) {
-            printf("p2p_debug_con [<handle>]\n");
-            printf("p2p_monitor_ctl <handle> <secs>\n");
+            PRINTF("p2p_debug_con [<handle>]\n");
+            PRINTF("p2p_monitor_ctl <handle> <secs>\n");
             continue;
         }
 
@@ -1959,7 +1959,7 @@ void * debug_thread(void * cx)
             if (argc == 1) {
                 handle = -1;
             } else if (sscanf(argv[1], "%d", &handle) != 1) {
-                printf("usage: p2p_debug_con [<handle>]\n");
+                PRINTF("usage: p2p_debug_con [<handle>]\n");
                 continue;
             }
             p2p_debug_con(handle);
@@ -1974,7 +1974,7 @@ void * debug_thread(void * cx)
                 sscanf(argv[1], "%d", &handle) != 1 ||
                 sscanf(argv[2], "%d", &secs) != 1)
             {
-                printf("usage: p2p_monitor_ctl <handle> <secs>\n");
+                PRINTF("usage: p2p_monitor_ctl <handle> <secs>\n");
                 continue;
             }
             p2p_monitor_ctl(handle, secs);

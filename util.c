@@ -17,7 +17,7 @@ int connect_to_cloud_server(char * user_name, char * password, char * service)
         ERROR("failed to get address of %s\n", CLOUD_SERVER_HOSTNAME);
         return -1;
     }
-    NOTICE("address of %s is %s\n",
+    INFO("address of %s is %s\n",
           CLOUD_SERVER_HOSTNAME, sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&addr));
 
     // create socket
@@ -128,21 +128,21 @@ void set_sock_opts(int sfd, int reuseaddr, int sndbuf, int rcvbuf, int rcvto_us)
     if (reuseaddr != -1) {
         ret = setsockopt(sfd, SOL_SOCKET, SO_REUSEADDR, &reuseaddr, sizeof(reuseaddr));
         if (ret == -1) {
-            printf("setsockopt SO_REUSEADDR, %s", strerror(errno));
+            ERROR("setsockopt SO_REUSEADDR, %s", strerror(errno));
         }
     }
 
     if (sndbuf != -1) {
         ret = setsockopt(sfd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
         if (ret == -1) {
-            printf("setsockopt SO_SNDBUF, %s", strerror(errno));
+            ERROR("setsockopt SO_SNDBUF, %s", strerror(errno));
         }
     }
 
     if (rcvbuf != -1) {
         ret = setsockopt(sfd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
         if (ret == -1) {
-            printf("setsockopt SO_RCVBUF, %s", strerror(errno));
+            ERROR("setsockopt SO_RCVBUF, %s", strerror(errno));
         }
     }
 
@@ -150,7 +150,7 @@ void set_sock_opts(int sfd, int reuseaddr, int sndbuf, int rcvbuf, int rcvto_us)
         struct timeval rcvto = {rcvto_us/1000000, rcvto_us%1000000};
         ret = setsockopt(sfd, SOL_SOCKET, SO_RCVTIMEO, &rcvto, sizeof(rcvto));
         if (ret == -1) {
-            printf("setsockopt SO_RCVBUF, %s", strerror(errno));
+            ERROR("setsockopt SO_RCVBUF, %s", strerror(errno));
         }
     }
 }
@@ -266,7 +266,11 @@ done:
     return ret;
 }
         
-// -----------------  LOGGING UTILS  --------------------------------------
+// -----------------  LOGGING & PRINTMSG  ---------------------------------
+
+// XXX update viewer to log to a file
+
+#ifndef ANDROID
 
 FILE * logmsg_fp;
 FILE * logmsg_fp_old;
@@ -350,13 +354,86 @@ void logmsg(char *lvl, const char *func, char *fmt, ...)
         }
     } else {
         // logging to stderr
-        if (strcmp(lvl,"NOTICE") == 0) {
-            fprintf(stderr,"%s\n", msg);
-        } else {
-            fprintf(stderr,"%s %s: %s\n", lvl, func, msg);
-        }
+        fprintf(stderr,"%s %s: %s\n", lvl, func, msg);
     }
 }
+
+void printmsg(char *fmt, ...) 
+{
+    va_list ap;
+
+    va_start(ap, fmt);
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+}
+
+#else
+
+#include <SDL.h>
+
+void logmsg_init(char * file_name)
+{
+    // nothing to do here for Android
+}
+
+void logmsg(char *lvl, const char *func, char *fmt, ...) 
+{
+    va_list ap;
+    char    msg[1000];
+    int     len;
+    char    time_str[MAX_TIME_STR];
+
+    // construct msg
+    va_start(ap, fmt);
+    vsnprintf(msg, sizeof(msg), fmt, ap);
+    va_end(ap);
+
+    // remove terminating newline
+    len = strlen(msg);
+    if (len > 0 && msg[len-1] == '\n') {
+        msg[len-1] = '\0';
+        len--;
+    }
+
+    // log the message
+    if (strcmp(lvl, "INFO") == 0) {
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION,
+                    "%s %s %s: %s\n",
+                    time2str(time_str, time(NULL), false),
+                    lvl, func, msg);
+    } else if (strcmp(lvl, "WARN") == 0) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "%s %s %s: %s\n",
+                    time2str(time_str, time(NULL), false),
+                    lvl, func, msg);
+    } else if (strcmp(lvl, "FATAL") == 0) {
+        SDL_LogCritical(SDL_LOG_CATEGORY_APPLICATION,
+                        "%s %s %s: %s\n",
+                        time2str(time_str, time(NULL), false),
+                        lvl, func, msg);
+    } else if (strcmp(lvl, "DEBUG") == 0) {
+        SDL_LogDebug(SDL_LOG_CATEGORY_APPLICATION,
+                     "%s %s %s: %s\n",
+                     time2str(time_str, time(NULL), false),
+                     lvl, func, msg);
+    } else {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "%s %s %s: %s\n",
+                     time2str(time_str, time(NULL), false),
+                     lvl, func, msg);
+    }
+}
+
+void printmsg(char *fmt, ...) 
+{
+    va_list ap;
+
+    va_start(ap, fmt);
+    SDL_LogMessageV(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO, fmt, ap);
+    va_end(ap);
+}
+
+#endif
 
 // -----------------  IMAGE UTILS  ----------------------------------------
 
@@ -484,7 +561,7 @@ bool system_clock_is_set(void)
     cnt = sscanf(s, "stratum=%d", &stratum);
     clock_is_set = (cnt == 1 && stratum < 16);
 
-    NOTICE("ntpq returned '%s' - clock_is_set=%d\n", s, clock_is_set);
+    INFO("ntpq returned '%s' - clock_is_set=%d\n", s, clock_is_set);
 
     fclose(fp);
 
@@ -506,7 +583,7 @@ uint64_t fs_avail_bytes(char * path)
     }
 
     free_bytes = (uint64_t)buf.f_bavail * buf.f_bsize;
-    NOTICE("fs path %s, free_bytes=%"PRId64"\n", path, free_bytes);
+    INFO("fs path %s, free_bytes=%"PRId64"\n", path, free_bytes);
 
     return free_bytes;
 }
