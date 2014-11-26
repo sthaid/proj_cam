@@ -1,3 +1,3 @@
 #!/bin/bash
 
-rm -rf bin gen libs obj
+rm -rf obj/local/armeabi-v7a/objs/main
