@@ -48,7 +48,8 @@ public class SDLActivity extends Activity {
     static {
         System.loadLibrary("SDL2");
         System.loadLibrary("SDL2_ttf");
-        System.loadLibrary("jpeg");
+        System.loadLibrary("SDL2_mixer");
+        System.loadLibrary("myjpeg");
         System.loadLibrary("main");
     }
     
