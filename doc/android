@@ -1,10 +1,70 @@
+yum install SDL2_mixer-devel
+http://www.libsdl.org/projects/SDL_mixer/
+where I got the beep
+beep converter
+
+
+-------------
+
+void Java_com_mypackage_MyClass_MyMethod(JNIEnv *jniEnv, jobject thiz)
+{
+    jclass *clazz = (*(*jniEnv)->FindClass)(jniEnv, "com/mypackage/SomeClass");
+    jmethodID MethodID = (*(*jniEnv)->GetStaticMethodID)(jniEnv, clazz, "SomeMethod", "(I)I");
+    int result = (*(*jniEnv)->CallStaticIntMethod)(jniEnv, clazz, MethodID, 18);
+kk
+
+javah -classpath  android-sdk/platforms/android-21/android.jar  -o xx.h android.media.ToneGenerator
+
+/home/haid/android-ndk/toolchains/arm-linux-androideabi-4.9/prebuilt/linux-x86_64/bin/arm-linux-androideabi-nm
+
+ ToneGenerator tg = new ToneGenerator(AudioManager.STREAM_RING, 100);
+ tg.startTone(ToneGenerator.TONE_PROP_BEEP);
+
+================
+
 TODO 
 ----
 
-- poer viewer to android
-  - rethink util.c logging
-  - download jpeglibturbo
+VIEWER TODO
+
+- beep on select
+
+- clean up the changes I've made so far
+  - recheck where printf used
+
+- figure out problem with display proc, and probably need to rewrite
   - lock streaming texture (if this is needed)
+
+- build with p2p2.c, 
+
+- store settings in file
+  - initialize username and password if not present
+  - detect login failure
+
+- select webcam name via drop down list
+
+- control pane
+  - the control buttons are 2 close togethor and the font too small
+    - optimize for Android, then try working with same confg on PC screen
+  - review the controls
+  - need to be able to also control some config, such as
+     username, password, zoom, zulu, protocol
+  - can I bring over the same font, and put in assets dir
+  - review how often rendertext is called for both live and playback
+
+- font, use the large font everywhere
+  - problem with rendertext going off of the end
+  - make rendertext a procedure
+
+- test with 4 cams
+
+- change ICON
+
+
+
+
+--------------------------------------------------------------
+
 
 - RW FILE
    - Refer to SDL readme
@@ -154,9 +214,10 @@ AndroidManifest.xml
 
    where android:targetSdkVersion -  An integer designating the API Level that the application 
    targets. If not set, the default value equals that given to minSdkVersion.
-   This attribute informs the system that you have tested against the target version and the system 
-   should not enable any compatibility behaviors to maintain your app's forward-compatibility with 
-   the target version. The application is still able to run on older versions (down to minSdkVersion).
+   This attribute informs the system that you have tested against the target version and the 
+   system should not enable any compatibility behaviors to maintain your app's 
+   forward-compatibility with the target version. The application is still able to run on 
+   older versions (down to minSdkVersion).
 
 
 SETTING UP MY PROJECT
