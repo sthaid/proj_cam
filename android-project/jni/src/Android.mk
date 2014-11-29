@@ -17,7 +17,7 @@ LOCAL_C_INCLUDES := $(LOCAL_PATH)/$(SDL_PATH)/include \
                     $(LOCAL_PATH)/$(JPEG_PATH)
 
 LOCAL_SRC_FILES := $(SDL_PATH)/src/main/android/SDL_android_main.c \
-	           viewer.c p2p2.c util.c jpeg_decode.c
+	           viewer.c p2p1.c p2p2.c util.c jpeg_decode.c ifaddrs.c
 
 LOCAL_SHARED_LIBRARIES := SDL2 SDL2_ttf SDL2_mixer myjpeg
 
