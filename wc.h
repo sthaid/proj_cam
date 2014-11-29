@@ -20,16 +20,13 @@
 #include <fcntl.h>
 #include <time.h>
 #include <signal.h>
-#ifndef ANDROID  //XXX
 #include <ifaddrs.h>
-#endif
 #include <termios.h>
 #include <assert.h>
 #include <inttypes.h>
 #include <setjmp.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <sys/statvfs.h>
 #include <sys/socket.h>
 #include <sys/resource.h>
 #include <sys/queue.h>
@@ -39,6 +36,14 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <net/if.h>
+
+#ifndef ANDROID
+#include <sys/statvfs.h>
+#endif
+
+#ifdef ANDROID
+#define SOCK_CLOEXEC 0
+#endif
 
 // -----------------  WC SERVER -----------------------------------------------------
 
