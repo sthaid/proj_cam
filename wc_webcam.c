@@ -10,6 +10,12 @@
 
 // TBD LATER - tune the values in compare_compare_jpeg used to determine pixel is different, or brightness change
 
+// XXX problem:
+// - lost the device when changing resolution
+// - pulling usb cable creatd /dev/video1
+// - had to restart program and pull usb cable again to recover
+
+
 //
 // defines
 //
