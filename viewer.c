@@ -1,13 +1,29 @@
 #include "wc.h"
+#include "button_sound.h"
+
 #include <SDL.h>
 #include <SDL_ttf.h>
+#include <SDL_mixer.h>
 
+// vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 // TBD - is mutex needed on ctl.mode
-
 // TBD LATER - copy fonts to this directory,  and incorporate in backup
 // TBD LATER - debug commands to dump global data structures
 
 // XXX can't resize window
+// XXX save config to file, for easy restart, includes username and password
+// XXX   - don't use the environment any more for username and password
+
+// #ifdef ANDROID
+//     // XXX this may be usefule for the setting file
+//     const char * path = SDL_AndroidGetInternalStoragePath();
+//     INFO("PATH '%s'\n", path);
+//     //sleep(3);
+// #endif
+
+// XXX review all ifdef ANDROID
+// XXX review all struct fields
+// XXX search for YYY
 
 //
 // defines 
@@ -15,10 +31,12 @@
 
 #define MAX_WEBCAM                  4
 #define MAX_GETCL_ARGV              10
-#define MAX_STR                     100
+#define MAX_STR                     100  //YYY delete
 
-#define WIN_WIDTH_INITIAL           800
-#define WIN_HEIGHT_INITIAL          480
+#define WIN_WIDTH_INITIAL           1280
+#define WIN_HEIGHT_INITIAL          800
+#define WIN_WIDTH_MIN               800
+#define WIN_HEIGHT_MIN              500
 #define CTL_WIDTH                   115
 
 #define STATE_NO_WC_ID_STR          0
@@ -26,7 +44,30 @@
 #define STATE_CONNECTED             2
 #define STATE_CONNECTING_ERROR      3
 #define STATE_CONNECTED_ERROR       4
-#define STATE_FATAL_ERROR          5
+#define STATE_FATAL_ERROR           5
+
+#define MS                          1000
+#define HIGHLIGHT_TIME_US           (2000*MS)
+#define RECONNECT_TIME_US           (10000*MS)
+
+#define IMAGE_DISPLAY_TEXT          1
+#define IMAGE_DISPLAY_IMAGE         2
+
+#define CONFIG_USERNAME             (config[0].value)
+#define CONFIG_PASSWORD             (config[1].value)
+#define CONFIG_WC_NAME(idx)         (config[2+idx].value)
+#define CONFIG_PROTOCOL             (config[6].value[0])    // 1, 2
+#define CONFIG_ZOOM                 (config[7].value[0])    // A, B, C, D, N
+#define CONFIG_ZULU_TIME            (config[8].value[0])    // N, Y
+#define CONFIG_DEBUG                (config[9].value[0])    // N, Y
+
+#ifndef ANDROID
+#define FONT_PATH                   "/usr/share/fonts/gnu-free/FreeMonoBold.ttf"
+#define SDL_FLAGS                   SDL_WINDOW_RESIZABLE
+#else
+#define FONT_PATH                   "/system/fonts/Arial.ttf"
+#define SDL_FLAGS                   SDL_WINDOW_FULLSCREEN_DESKTOP  //YYY
+#endif
 
 #define STATE_STR(state) \
    ((state) == STATE_NO_WC_ID_STR     ? "STATE_NO_WC_ID_STR"      : \
@@ -34,28 +75,8 @@
     (state) == STATE_CONNECTED        ? "STATE_CONNECTED"         : \
     (state) == STATE_CONNECTING_ERROR ? "STATE_CONNECTING_ERROR"  : \
     (state) == STATE_CONNECTED_ERROR  ? "STATE_CONNECTED_ERROR"   : \
-    (state) == STATE_FATAL_ERROR     ? "STATE_FATAL_ERROR"        \
+    (state) == STATE_FATAL_ERROR      ? "STATE_FATAL_ERROR"        \
                                       : "????")
-
-#define LONG_SLEEP_US               200000
-#define SLEEP_US                    50000
-#define SHORT_SLEEP_US              1000
-#define HIGHLIGHT_TIME_US           2000000
-#define RECONNECT_TIME_US           10000000
-
-#define NO_HANDLE                   (-1)
-#define NO_ZOOM                     (-1)
-#define INVALID_ZOOM                (-2)
-
-#define FONT_PATH                   "/usr/share/fonts/gnu-free/FreeMonoBold.ttf"
-#define FONTS_CHAR_WIDTH            fonts_cw
-#define FONTS_CHAR_HEIGHT           fonts_ch
-#define FONTL_CHAR_WIDTH            fontl_cw
-#define FONTL_CHAR_HEIGHT           fontl_ch
-
-#define IMAGE_DISPLAY_NONE    0
-#define IMAGE_DISPLAY_TEXT    1
-#define IMAGE_DISPLAY_IMAGE   2
 
 #define CVT_INTERVAL_SECS_TO_DAY_HMS(dur_secs, days, hours, minutes, seconds) \
     do { \
@@ -162,6 +183,18 @@
         ctl.mode.mode_id++; \
     } while (0)
 
+// YYY recheck the sleep time here
+#define PLAY_BUTTON_SOUND() \
+    do { \
+        Mix_PlayChannel(-1, button_sound, 0); \
+        usleep(300*MS); \
+    } while (0)
+
+#define CONFIG_WRITE() \
+    do { \
+        config_write(config_file_name, config); \
+    } while (0)
+
 //
 // typedefs
 //
@@ -169,7 +202,7 @@
 typedef struct {
     int             state;
     int             handle;
-    uint64_t        last_state_change_time_us;
+    uint64_t        last_state_change_time_us;      // YYY put some of these in the thread
     uint64_t        last_status_msg_recv_time_us;
     uint64_t        last_dead_text_display_time_us;
     uint64_t        last_highlight_enable_time_us;
@@ -181,10 +214,11 @@ typedef struct {
     uint64_t        recvd_bytes;
 
     pthread_mutex_t image_mutex;
+    uint64_t        image_change;
     char            image_wc_name[MAX_STR];
+    char            image_wc_res[MAX_STR];
     bool            image_highlight;
     uint32_t        image_display;
-    bool            image_update_request;
     uint8_t       * image;
     int             image_w;
     int             image_h;
@@ -206,12 +240,6 @@ typedef struct {
     SDL_Texture * texture;
     int           texture_w;
     int           texture_h;
-
-    bool          image_highlight_last;
-    char          wc_name_last[MAX_STR];
-    char          res_str_last[MAX_STR];
-    uint32_t      mode_last;
-    uint64_t      recvd_bytes_last;
 } webcamdi_t;
 
 typedef struct {
@@ -219,7 +247,6 @@ typedef struct {
 
     SDL_Rect ctl_pos;
     SDL_Rect mode_pos;
-    SDL_Rect fulls_pos;
     SDL_Rect date_pos;
     SDL_Rect time_pos;
     SDL_Rect pb_time_pos;
@@ -249,9 +276,8 @@ typedef struct {
 
 typedef struct {
     // general events
+    // YYY verify all of these events are supported
     bool quit_event;
-    bool redisplay_event;
-    bool fulls_event;
     bool con_info_event;
 
     // mode change event
@@ -261,7 +287,6 @@ typedef struct {
     bool pb_stop_event;
     bool pb_play_pause_event;
     bool pb_speed_event;
-    char pb_speed_event_value_str[MAX_STR];
     bool pb_dir_event;
     bool pb_sec_minus_event;
     bool pb_sec_plus_event;
@@ -290,45 +315,44 @@ typedef struct {
         bool wc_name_event;
         char wc_name[MAX_STR];
     } wc[MAX_WEBCAM];
-
-    // used for text input
-    bool wc_name_input_in_prog[MAX_WEBCAM];
-    bool pb_speed_input_in_prog;
-    char text_input_str[MAX_STR];
 } event_t;
-
-typedef uint32_t pixel_t;
 
 //
 // variables
 //
 
-p2p_routines_t * p2p;
-char           * user_name;
-char           * password;
 SDL_Window     * window;
 SDL_Renderer   * renderer;
 int              win_width;
 int              win_height;
-int              zoom;
+
+TTF_Font       * font;
+int              font_char_width;
+int              font_char_height;
+
+Mix_Chunk      * button_sound;
+
+char             webcam_names[MAX_USER_WC][MAX_WC_NAME+1];
+int              max_webcam_names;
 int              webcam_threads_running_count;
-bool             opt_zulu_time;
 
 webcam_t         webcam[MAX_WEBCAM];
 webcamdi_t       webcamdi[MAX_WEBCAM];
 event_t          event;
 ctl_t            ctl;
 
-#if 0
-pixel_t          color_black;
-pixel_t          color_white;
-pixel_t          color_blue;
-#endif
-
-TTF_Font       * fonts;
-TTF_Font       * fontl;
-int              fonts_cw, fonts_ch;
-int              fontl_cw, fontl_ch;
+char             config_file_name[MAX_STR];
+config_t         config[] = { { "username",  "steve"    },
+                              { "password",  "password" },
+                              { "wc_name_A", "wc1"      },
+                              { "wc_name_B", ""         },
+                              { "wc_name_C", ""         },
+                              { "wc_name_D", ""         },
+                              { "protocol",  "1"        },
+                              { "zoom",      "A",       },
+                              { "zulu_time", "N"        },
+                              { "debug",     "N"        },
+                              { NULL,        NULL       } };
 
 //
 // prototypes
@@ -336,23 +360,23 @@ int              fontl_cw, fontl_ch;
 
 void event_handler(void);
 void display_handler(void);
+void render_text(char * str, SDL_Rect pos, bool ctl, bool centered);
 void * webcam_thread(void * cx);
+#ifndef ANDROID
 void * debug_thread(void * cx);
 bool getcl(int * argc, char ** argv);
+#endif
 
 // -----------------  MAIN  ----------------------------------------------
 
 int main(int argc, char **argv)
 {
     struct rlimit  rl;
-    char *         wc_name[MAX_WEBCAM];
-    int            max_wc_name;
-    pthread_t      debug_thread_id;
-    pthread_t      webcam_thread_id[MAX_WEBCAM];
-    char           opt_char;
-    bool           opt_use_p2p2, opt_debug;
-    char         * opt_zoom_str;  
+    const char         * dir;
     int            ret, i, count;
+    int            sfd;
+    FILE         * fp;
+    char           s[MAX_STR];
 
     // set resource limti to allow core dumps
     rl.rlim_cur = RLIM_INFINITY;
@@ -362,127 +386,103 @@ int main(int argc, char **argv)
         WARN("setrlimit for core dump, %s\n", strerror(errno));
     }
 
-    // get user_name and password from environment
-    user_name = getenv("WC_USER_NAME");
-    password  = getenv("WC_PASSWORD");
-
-    // parse options
-    opt_use_p2p2 = opt_debug = false;
-    opt_zoom_str = NULL;
-    while (true) {
-        opt_char = getopt(argc, argv, "Pdz:u:p:Z");
-        if (opt_char == -1) {
-            break;
-        }
-        switch (opt_char) {
-        case 'P':
-            opt_use_p2p2 = true;
-            break;
-       case 'd':
-            opt_debug = true;
-            break;
-        case 'z':
-            opt_zoom_str = optarg;
-            opt_zoom_str[0] = toupper(opt_zoom_str[0]);
-            break;
-        case 'u':
-            user_name = optarg;
-            break;
-        case 'p':
-            password = optarg;
-            break;
-        case 'Z':
-            opt_zulu_time = true;
-            break;
-        default:
-            return 1;
-        }
+    // read viewer config
+    // YYY different on android ?
+#ifndef ANDROID
+    dir = getenv("HOME");
+    if (dir == NULL) {
+        FATAL("env var HOME not set\n");
+    }
+#else
+    dir = SDL_AndroidGetInternalStoragePath();
+    if (dir == NULL) {
+        FATAL("android internal storage path not set\n");
+    }
+#endif
+    sprintf(config_file_name, "%s/.viewer_config", dir);
+    INFO("XXXXXXXXXXXXXXXXXX CONFIG_FILE_NAME %s\n", config_file_name);
+    if (config_read(config_file_name, config) < 0) {
+        FATAL("config_read failed for %s\n", config_file_name);
     }
 
-    // verify user_name, password, and args
-    if ((user_name == NULL) || (password == NULL) || 
-        (opt_zoom_str != NULL && (strlen(opt_zoom_str) != 1 || opt_zoom_str[0] < 'A' || opt_zoom_str[0] > 'D')) ||
-        (argc-optind > MAX_WEBCAM)) 
-    {
-        PRINTF("usage: viewer <user_name> <password> <wc_name> ...\n");
-        PRINTF("  -P: use http proxy server\n");
-        PRINTF("  -z <A|B|C|D>: sets zoom webcam\n");
-        PRINTF("  -d: enable debug\n");
-        PRINTF("  -u <user_name>: override WC_USER_NAME environment value\n");
-        PRINTF("  -p <password>: override WC_PASSWORD environment value\n");
-        PRINTF("  -Z: zulu time\n");
-        return 1;
+    // verify username and password have been obtained from the config
+    if (strlen(CONFIG_USERNAME) == 0) {
+        FATAL("config does not contain username\n");
     }
-    max_wc_name = 0;
-    for (i = optind; i < argc; i++) {
-        wc_name[max_wc_name++] = argv[i];
-    }
-    DEBUG("user_name=%s password=%s max_wc_name=%d\n", user_name, password, max_wc_name);
-    for (i = 0; i < max_wc_name; i++) {
-        DEBUG("wc_name[%d] = %s\n", i, wc_name[i]);
+    if (strlen(CONFIG_PASSWORD) == 0) {
+        FATAL("config does not contain password\n");
     }
 
-    // init globals, non zero values only
-    p2p         = !opt_use_p2p2 ? &p2p1 : &p2p2;
-    win_width   = WIN_WIDTH_INITIAL;
-    win_height  = WIN_HEIGHT_INITIAL;
-    zoom        = NO_ZOOM;
-
-    for (i = 0; i < MAX_WEBCAM; i++) {
-        webcam[i].state = STATE_NO_WC_ID_STR;
-        webcam[i].handle = NO_HANDLE;
-        pthread_mutex_init(&webcam[i].image_mutex,NULL);
+    // get list of available webcams 
+    sfd = connect_to_cloud_server(CONFIG_USERNAME, CONFIG_PASSWORD, "command");
+    if (sfd < 0) {
+        FATAL("login to cloud_server failed\n");
+    }
+    fp = fdopen(sfd, "w+");   // mode: read/write
+    if (fp == NULL) {
+        FATAL("login to cloud_server failed fdopen\n");
+    }
+    fputs("ls\n", fp);
+    while (fgets(s, sizeof(s), fp) != NULL) {
+        strcpy(webcam_names[max_webcam_names++], strtok(s, " "));
+    }
+    fclose(fp);
+    for (i = 0; i < max_webcam_names; i++) {  //YYY temp
+        INFO("LIST %s\n", webcam_names[i]);
     }
 
-    if (opt_zoom_str) {
-        event.zoom_event = true;
-        event.zoom_value = opt_zoom_str[0] - 'A';
-    }
-    for (i = 0; i < max_wc_name; i++) {
-        event.wc[i].wc_name_event = true;
-        strcpy(event.wc[i].wc_name, wc_name[i]);
-    }
-
+    // initialize to live mode
     SET_CTL_MODE_LIVE();
 
     // initialize Simple DirectMedia Layer  (SDL)
-    if (SDL_Init(SDL_INIT_VIDEO) < 0) {
+    if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO) < 0) {
         FATAL("SDL_Init failed\n");
     }
-    if (SDL_CreateWindowAndRenderer(win_width, win_height, 0, &window, &renderer) != 0) {  // XXX flags
+
+    // create SDL Window and Renderer
+    if (SDL_CreateWindowAndRenderer(WIN_WIDTH_INITIAL, WIN_HEIGHT_INITIAL, SDL_FLAGS, &window, &renderer) != 0) {
         FATAL("SDL_CreateWindowAndRenderer failed\n");
+    }
+    SDL_GetWindowSize(window, &win_width, &win_height);
+
+    // init button_sound
+    if (Mix_OpenAudio( 22050, MIX_DEFAULT_FORMAT, 2, 4096) < 0) {
+        FATAL("Mix_OpenAudio failed\n");
+    }
+    button_sound = Mix_QuickLoad_WAV(button_sound_wav);
+    Mix_VolumeChunk(button_sound,MIX_MAX_VOLUME/4);
+    if (button_sound == NULL) {
+        FATAL("Mix_QuickLoadWAV failed\n");
     }
 
     // initialize True Type Font
     if (TTF_Init() < 0) {
         FATAL("TTF_Init failed\n");
     }
-    fonts = TTF_OpenFont(FONT_PATH, 16);
-    if (fonts == NULL) {
+    font = TTF_OpenFont(FONT_PATH, 20);
+    if (font == NULL) {
         FATAL("failed TTF_OpenFont %s\n", FONT_PATH);
     }
-    fontl = TTF_OpenFont(FONT_PATH, 20);
-    if (fontl == NULL) {
-        FATAL("failed TTF_OpenFont %s\n", FONT_PATH);
-    }
-    TTF_SizeText(fonts, "X", &fonts_cw, &fonts_ch);
-    TTF_SizeText(fontl, "X", &fontl_cw, &fontl_ch);
+    TTF_SizeText(font, "X", &font_char_width, &font_char_height);
 
+#ifndef ANDROID
     // if debug mode enabled then create debug_thread
-    debug_thread_id = 0;
-    if (opt_debug > 0) {
+    pthread_t debug_thread_id = 0;
+    if (CONFIG_DEBUG == 'Y') {
         pthread_create(&debug_thread_id, NULL, debug_thread, NULL);
     }
+#endif
 
     // create webcam threads 
     for (i = 0; i < MAX_WEBCAM; i++) {
-        pthread_create(&webcam_thread_id[i], NULL, webcam_thread, (void*)(long)i);
+        pthread_t webcam_thread_id;
+        pthread_create(&webcam_thread_id, NULL, webcam_thread, (void*)(long)i);
     }
 
     // wait for up to 3 second for the webcam threads to initialize
     count = 0;
-    while (webcam_threads_running_count != MAX_WEBCAM && count++ < 3000000/SLEEP_US) {
-        usleep(SLEEP_US);
+    while (webcam_threads_running_count != MAX_WEBCAM && count++ < 3000/10) {
+        usleep(10*MS);
     }
     if (webcam_threads_running_count != MAX_WEBCAM) {
         FATAL("webcam threads failed to start\n");
@@ -492,29 +492,36 @@ int main(int argc, char **argv)
     while (!event.quit_event) {
         event_handler();
         display_handler();
-        usleep(SLEEP_US);
+        usleep(10*MS);
     }
 
     // wait for up to 3 second for the webcam threads to terminate
+    // YYY does this code run on android when the pgm exits
+    // YYY what is causing the threads to exit?
     count = 0;
-    while (webcam_threads_running_count != 0 && count++ < 3000000/SLEEP_US) {
-        usleep(SLEEP_US);
+    while (webcam_threads_running_count != 0 && count++ < 3000/10) {
+        usleep(10*MS);
     }
     if (webcam_threads_running_count != 0) {
         WARN("webcam threads failed to terminate\n");
     }
 
+#ifndef ANDROID
     // cancel the debug thread
     if (debug_thread_id) {
         pthread_cancel(debug_thread_id);
         pthread_join(debug_thread_id, NULL);
     }
+#endif
 
-    // SDL quit
+    // cleanup
+    Mix_FreeChunk(button_sound);
+    Mix_CloseAudio();
     TTF_Quit();
     SDL_Quit();
 
     // return success
+    INFO("program terminating\n");
     return 0;
 }
 
@@ -522,22 +529,13 @@ int main(int argc, char **argv)
 
 void event_handler(void)
 {
-    SDL_Event   ev;
-    SDL_Keycode key;
-    bool        shift;
-    int         i;
+    SDL_Event ev;
+    int       i;
 
     #define MOUSE_AT_POS(pos) (ev.button.x >= (pos).x && \
                                ev.button.x < (pos).x + (pos).w && \
                                ev.button.y >= (pos).y && \
                                ev.button.y < (pos).y + (pos).h)
-
-    #define CANCEL_TEXT_INPUT \
-        do { \
-            bzero(event.text_input_str, sizeof(event.text_input_str)); \
-            bzero(event.wc_name_input_in_prog , sizeof(event.wc_name_input_in_prog)); \
-            event.pb_speed_input_in_prog = false; \
-        } while (0)
 
     //
     // loop while the quit_event is not set
@@ -557,86 +555,8 @@ void event_handler(void)
         //
 
         switch (ev.type) {
-        case SDL_KEYDOWN:
-            // set variables: key and shift
-            key = ev.key.keysym.sym;
-            shift = (ev.key.keysym.mod & KMOD_SHIFT) != 0;
-            if (key >= 'a' && key <= 'z' && shift) {
-                key -= ('a' - 'A');
-            }
-            if (key == '-' && shift) {
-                key = '_';
-            }
-
-            // handle wc_name text input
-            for (i = 0; i < MAX_WEBCAM; i++) {
-                if (event.wc_name_input_in_prog[i]) {
-                    if (isprint(key)) {
-                        int len = strlen(event.text_input_str);
-                        event.text_input_str[len] = key;
-                    } else if (key == SDLK_BACKSPACE) {
-                        int len = strlen(event.text_input_str);
-                        if (len > 0) {
-                            event.text_input_str[len-1] = '\0';
-                        }
-                    } else if (key == SDLK_ESCAPE) {
-                        CANCEL_TEXT_INPUT;
-                    } else if (key == SDLK_RETURN) {
-                        strcpy(event.wc[i].wc_name, event.text_input_str);
-                        event.wc[i].wc_name_event = true;
-                        CANCEL_TEXT_INPUT;
-                    }
-                    break;
-                }
-            }
-            if (i < MAX_WEBCAM) {
-                break;
-            }
-
-            // handle pb_speed text input
-            if (event.pb_speed_input_in_prog) {
-                if (isprint(key)) {
-                    int len = strlen(event.text_input_str);
-                    event.text_input_str[len] = key;
-                } else if (key == SDLK_BACKSPACE) {
-                    int len = strlen(event.text_input_str);
-                    if (len > 0) {
-                        event.text_input_str[len-1] = '\0';
-                    }
-                } else if (key == SDLK_ESCAPE) {
-                    CANCEL_TEXT_INPUT;
-                } else if (key == SDLK_RETURN) {
-                    strcpy(event.pb_speed_event_value_str, event.text_input_str);
-                    event.pb_speed_event = true;
-                    CANCEL_TEXT_INPUT;
-                }
-                break;
-            }
-
-            // check for program events that are associated with key events
-            if (key == 'q') {
-                event.quit_event = true;
-                break;
-            }
-            if (key == 'r') {
-                event.redisplay_event = true;
-                break;
-            }
-            break;
-
-        case SDL_KEYUP:
-            break;
-
-        case SDL_MOUSEBUTTONDOWN:
-            if (ev.button.button != SDL_BUTTON_LEFT) {
-                break;
-            }
-
-            CANCEL_TEXT_INPUT;
-            break;
-
-        case SDL_MOUSEBUTTONUP:
-            DEBUG("MOUSE UP which=%d button=%s state=%s x=%d y=%d\n",
+        case SDL_MOUSEBUTTONDOWN: 
+            DEBUG("MOUSE DOWN which=%d button=%s state=%s x=%d y=%d\n",
                    ev.button.which,
                    (ev.button.button == SDL_BUTTON_LEFT   ? "LEFT" :
                     ev.button.button == SDL_BUTTON_MIDDLE ? "MIDDLE" :
@@ -652,109 +572,138 @@ void event_handler(void)
                 break;
             }
 
-            CANCEL_TEXT_INPUT;
-
             // webcam events
             for (i = 0; i < MAX_WEBCAM; i++) {
                 webcamdi_t * wcdi = &webcamdi[i];
 
                 if (MOUSE_AT_POS(wcdi->image_pos)) {
                     event.zoom_event = true;
-                    event.zoom_value = i;
+                    event.zoom_value = 'A'+i;
+                    PLAY_BUTTON_SOUND();
                     break;
                 }
                 if (MOUSE_AT_POS(wcdi->res_pos) && ctl.mode.mode == MODE_LIVE) {
                     event.wc[i].res_event = true;
+                    PLAY_BUTTON_SOUND();
                     break;
                 }
+#if 0
                 if (MOUSE_AT_POS(wcdi->wc_name_pos)) {
-                    event.wc_name_input_in_prog[i] = true;
+                    event.wc_name_input_in_prog[i] = true;  //YYY
+                    PLAY_BUTTON_SOUND();
                     break;
                 }
+#endif
             }
             if (i < MAX_WEBCAM) {
                 break;
             }
 
+#if 0 // YYY later
             // control panel events
-#ifdef FULLS_SUPPORT
-            if (MOUSE_AT_POS(ctl.fulls_pos)) {
-                event.fulls_event = true;
+            if (MOUSE_AT_POS(ctl.mode_pos)) {
+                event.mode_event = true;
+                PLAY_BUTTON_SOUND();
                 break;
             }
 #endif
-            if (MOUSE_AT_POS(ctl.mode_pos)) {
-                event.mode_event = true;
-                break;
-            }
             if (MOUSE_AT_POS(ctl.con_info_title_pos)) {
                 event.con_info_event = true;
+                PLAY_BUTTON_SOUND();
                 break;
             }
+#if 0 // YYY later
             if (ctl.mode.mode == MODE_PLAYBACK) {
                 if (MOUSE_AT_POS(ctl.pb_stop_pos)) {
                     event.pb_stop_event = true;
+                    PLAY_BUTTON_SOUND();
                     break;
                 }
                 if (MOUSE_AT_POS(ctl.pb_play_pause_pos)) {
                     event.pb_play_pause_event = true;
+                    PLAY_BUTTON_SOUND();
                     break;
                 }
                 if (MOUSE_AT_POS(ctl.pb_dir_value_pos)) {
                     event.pb_dir_event = true;
+                    PLAY_BUTTON_SOUND();
                     break;
                 }
                 if (MOUSE_AT_POS(ctl.pb_speed_value_pos)) {
                     event.pb_speed_input_in_prog = true;
+                    PLAY_BUTTON_SOUND();
                     break;
                 }
                 if (MOUSE_AT_POS(ctl.pb_sec_minus_pos)) {
                     event.pb_sec_minus_event = true;
+                    PLAY_BUTTON_SOUND();
                     break;
                 }
                 if (MOUSE_AT_POS(ctl.pb_sec_plus_pos)) {
                     event.pb_sec_plus_event = true;
+                    PLAY_BUTTON_SOUND();
                     break;
                 }
                 if (MOUSE_AT_POS(ctl.pb_min_minus_pos)) {
                     event.pb_min_minus_event = true;
+                    PLAY_BUTTON_SOUND();
                     break;
                 }
                 if (MOUSE_AT_POS(ctl.pb_min_plus_pos)) {
                     event.pb_min_plus_event = true;
+                    PLAY_BUTTON_SOUND();
                     break;
                 }
                 if (MOUSE_AT_POS(ctl.pb_hour_minus_pos)) {
                     event.pb_hour_minus_event = true;
+                    PLAY_BUTTON_SOUND();
                     break;
                 }
                 if (MOUSE_AT_POS(ctl.pb_hour_plus_pos)) {
                     event.pb_hour_plus_event = true;
+                    PLAY_BUTTON_SOUND();
                     break;
                 }
                 if (MOUSE_AT_POS(ctl.pb_day_minus_pos)) {
                     event.pb_day_minus_event = true;
+                    PLAY_BUTTON_SOUND();
                     break;
                 }
                 if (MOUSE_AT_POS(ctl.pb_day_plus_pos)) {
                     event.pb_day_plus_event = true;
+                    PLAY_BUTTON_SOUND();
                     break;
                 }
             }
+#endif
             break;
 
-#ifdef TBD
-       case SDL_VIDEORESIZE:
-            event.resize_w  = ev.resize.w;
-            event.resize_h = ev.resize.h;
-            event.resize_event = true;
+#ifndef ANDROID  //YYY do I need this ifdef
+       case SDL_WINDOWEVENT: 
+            // INFO("YYY GOT WINDOWEVENT %d\n", ev.window.event);
+            switch (ev.window.event)  {
+            case SDL_WINDOWEVENT_SIZE_CHANGED:
+                // INFO("YYY  -- SIZE CHANGE %d %d\n",
+                       // ev.window.data1, ev.window.data2);
+                event.resize_w = ev.window.data1;
+                event.resize_h = ev.window.data2;
+                event.resize_event = true;
+                PLAY_BUTTON_SOUND();
+                break;
+            default:
+                break;
+            }
             break;
 #endif
 
         case SDL_QUIT:
             event.quit_event = true;
+            PLAY_BUTTON_SOUND();
             break;
         }
+
+#if 0
+//YYY maybe these should not be done here
 
         //
         // some of the event processing is done right here
@@ -804,6 +753,7 @@ void event_handler(void)
         }
 
         // process pb_speed_event
+        // YYY 
         if (event.pb_speed_event) {
             double speed;
             if (sscanf(event.pb_speed_event_value_str, "%lf", &speed) == 1 &&
@@ -825,35 +775,35 @@ void event_handler(void)
         // process pb_real_time_us change events
         int64_t delta_us = 0;
         if (event.pb_sec_minus_event) {
-            delta_us = -1 * 1000000L;
+            delta_us = -1 * 1000000LL;
             event.pb_sec_minus_event = false;
         }
         if (event.pb_sec_plus_event) {
-            delta_us = 1 * 1000000L;
+            delta_us = 1 * 1000000LL;
             event.pb_sec_plus_event = false;
         }
         if (event.pb_min_minus_event) {
-            delta_us = -60 * 1000000L;
+            delta_us = -60 * 1000000LL;
             event.pb_min_minus_event = false;
         }
         if (event.pb_min_plus_event) {
-            delta_us = 60 * 1000000L;
+            delta_us = 60 * 1000000LL;
             event.pb_min_plus_event = false;
         }
         if (event.pb_hour_minus_event) {
-            delta_us = -3600 * 1000000L;
+            delta_us = -3600 * 1000000LL;
             event.pb_hour_minus_event = false;
         }
         if (event.pb_hour_plus_event) {
-            delta_us = 3600 * 1000000L;
+            delta_us = 3600 * 1000000LL;
             event.pb_hour_plus_event = false;
         }
         if (event.pb_day_minus_event) {
-            delta_us = -86400 * 1000000L;
+            delta_us = -86400 * 1000000LL;
             event.pb_day_minus_event = false;
         }
         if (event.pb_day_plus_event) {
-            delta_us = 86400 * 1000000L;
+            delta_us = 86400 * 1000000LL;
             event.pb_day_plus_event = false;
         }
         if (delta_us != 0) {
@@ -880,6 +830,7 @@ void event_handler(void)
         if (all_eod || all_bod) {
             SET_CTL_MODE_PLAYBACK_STOP(false);
         }
+#endif
     }
 }
 
@@ -898,24 +849,22 @@ void display_handler(void)
     #define INIT_CTL_POS(fld,r,c,len) \
         do { \
             INIT_POS(ctl.fld, \
-                     ctl_x + FONTS_CHAR_WIDTH/2 + (c) * FONTS_CHAR_WIDTH, \
-                     ctl_y + (r) * FONTS_CHAR_HEIGHT + 1,  \
-                     (len) * FONTS_CHAR_WIDTH,  \
-                     FONTS_CHAR_HEIGHT); \
+                     ctl_x + font_char_width/2 + (c) * font_char_width, \
+                     ctl_y + (r) * font_char_height + 1,  \
+                     (len) * font_char_width,  \
+                     font_char_height); \
         } while (0)
 
     #define RENDER_CLEAR_ALL() \
         do { \
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE); \
             SDL_RenderClear(renderer); \
-            display_updated = true; \
         } while (0)
 
     #define RENDER_CLEAR_RECT(pos) \
         do { \
             SDL_SetRenderDrawColor(renderer, 0, 0, 0, SDL_ALPHA_OPAQUE); \
             SDL_RenderFillRects(renderer, &(pos), 1); \
-            display_updated = true; \
         } while (0)
 
     #define RENDER_BORDER(pos, highlight) \
@@ -927,38 +876,13 @@ void display_handler(void)
             } \
             SDL_RenderDrawRect(renderer, &(pos)); \
             SDL_RenderDrawLine(renderer,  \
-                               (pos).x, (pos).y+FONTS_CHAR_HEIGHT+1, \
-                               (pos).x+(pos).w-1, (pos).y+FONTS_CHAR_HEIGHT+1); \
-            display_updated = true; \
+                               (pos).x, (pos).y+font_char_height+1, \
+                               (pos).x+(pos).w-1, (pos).y+font_char_height+1); \
         } while (0)
 
-    // XXX debug print on all calls
-    // XXX what if the string is bigger?
-    #define RENDER_TEXT(font, str, pos, ctl, centered) \
+    #define RENDER_TEXT(str, pos, ctl, centered) \
         do { \
-            INFO("RENDER_TEXT '%s'\n", str); \
-            SDL_Surface *surface; \
-            SDL_Texture *texture; \
-            SDL_Color fg_color_normal = {255,255,255}; \
-            SDL_Color fg_color_ctl = {0,255,255}; \
-            SDL_Color bg_color = {0,0,0}; \
-            SDL_Rect pos2 = (pos); \
-            RENDER_CLEAR_RECT(pos2); \
-            surface = TTF_RenderText_Shaded((font), (str), (ctl) ? fg_color_ctl : fg_color_normal, bg_color); \
-            if (surface == NULL) { \
-                break; \
-            } \
-            texture = SDL_CreateTextureFromSurface(renderer, surface); \
-            if (!centered || surface->w >= pos2.w) { \
-                pos2.w = surface->w; \
-            } else { \
-                pos2.x += (pos2.w - surface->w) / 2; \
-                pos2.w = surface->w; \
-            } \
-            SDL_RenderCopy(renderer, texture, NULL, &pos2); \
-            SDL_FreeSurface(surface); \
-            SDL_DestroyTexture(texture); \
-            display_updated = true; \
+            render_text(str, pos, ctl, centered); \
         } while (0)
 
     #define RENDER_PRESENT() \
@@ -966,66 +890,146 @@ void display_handler(void)
             SDL_RenderPresent(renderer); \
         } while (0)
 
-    int               i;
-    bool              display_all = false;
-    bool              display_updated = false; 
+    bool            event_handled = false;
+    int             i;
+    char            date_and_time_str[MAX_TIME_STR];
+    time_t          secs;
 
-    static bool       first_call  = true;
+    static int      con_info_select;
+
+    static uint64_t last_mode_id;
+    static uint64_t last_image_change[MAX_WEBCAM];
+    static uint64_t last_window_update_us;
+    static char     last_date_and_time_str[MAX_TIME_STR];
 
     //
-    // if first_call or event that requires redisplay
+    // process events
+    // YYY process these in the event_handler
     //
 
-    if (first_call || 
-        event.zoom_event || 
-        event.resize_event || 
-#ifdef FULLS_SUPPORT
-        event.fulls_event || 
+    // zoom event 
+    if (event.zoom_event) {
+        CONFIG_ZOOM = (CONFIG_ZOOM == event.zoom_value ? 'N' : event.zoom_value);
+        CONFIG_WRITE();
+        event.zoom_event = false;
+        event_handled = true;
+    }
+
+    // connection info event
+    if (event.con_info_event) {
+        event.con_info_event = false;
+        con_info_select = (con_info_select + 1) % 3;  // YYY this should be the update condition
+        event_handled = true;
+    }
+
+#ifndef ANDROID  //YYY maybe don't need this ifdef
+    // resize event
+    if (event.resize_event) {
+        win_width = event.resize_w;
+        win_height = event.resize_h;
+        if (win_width < WIN_WIDTH_MIN || win_height < WIN_HEIGHT_MIN) {
+            if (win_width < WIN_WIDTH_MIN) {
+                win_width = WIN_WIDTH_MIN;
+            }
+            if (win_height < WIN_HEIGHT_MIN) {
+                win_height = WIN_HEIGHT_MIN;
+            }
+            INFO("YYY CALLING SDL_SetWindowSize   %d %d\n",  win_width, win_height);
+            SDL_SetWindowSize(window, win_width, win_height);
+        }
+        event.resize_event = false;
+        event_handled = true;
+    }
 #endif
-        event.redisplay_event) 
-    {
+
+    //
+    // create the data_and_tims_str
+    //
+
+    if (ctl.mode.mode == MODE_LIVE) {
+        secs = time(NULL);
+    } else {
+        if (ctl.mode.pb_submode == PB_SUBMODE_PLAY) {
+            secs = PB_SUBMODE_PLAY_REAL_TIME_US(&ctl.mode) / 1000000;
+        } else {
+            secs = ctl.mode.pb_real_time_us / 1000000;
+        }
+    }
+    time2str(date_and_time_str, secs, CONFIG_ZULU_TIME=='Y');
+    if (CONFIG_ZULU_TIME=='Y') {
+        strcpy(date_and_time_str+17, " Z");
+    }
+
+    // YYY review number of calls to microsec_timer
+
+    //
+    // check if display needs to be rendered, if not then return
+    //
+    // the following conditions require display update
+    // - mode has changed
+    // - an image has changed (either pane, name, or resolution)
+    // - an event is handled 
+    // - control pane date_time change and last update > 250ms ago
+    // - last update was greater than 1 second ago
+    //
+
+    do {
+        if (ctl.mode.mode_id != last_mode_id) {
+            // INFO("YYY update - ctl mode change\n");
+            break;
+        }
+
+        for (i = 0; i < MAX_WEBCAM; i++) {
+            if (webcam[i].image_change != last_image_change[i]) {
+                break;
+            }
+        }
+        if (i < MAX_WEBCAM) {
+            static int YYY_COUNT;
+            INFO("YYY update - image %d change   COUNT %d\n", i, YYY_COUNT++);
+            break;
+        }
+
+        if (event_handled) {
+            // INFO("YYY update - event change\n");
+            break;
+        }
+
+        if (strcmp(date_and_time_str, last_date_and_time_str) != 0 &&
+            microsec_timer() - last_window_update_us > 250*MS)
+        {
+            // INFO("YYY update - date/time change\n");
+            break;
+        }
+
+        if (microsec_timer() - last_window_update_us > 1000*MS) {
+            // INFO("YYY update - one sec change\n");
+            break;
+        }
+
+        return;
+    } while (0);
+
+    //
+    //  save the 'last' values used in the code block above
+    //
+
+    last_mode_id= ctl.mode.mode_id;
+    for (i = 0; i < MAX_WEBCAM; i++) {
+        last_image_change[i] = webcam[i].image_change;
+    }
+    strcpy(last_date_and_time_str, date_and_time_str);
+    last_window_update_us = microsec_timer();
+
+    //
+    // if the display layout has changed then
+    // recompute positions of the components
+    //
+
+    // YYY if (display layout has changed) {
+    if (true) {
         int ctl_x, ctl_y, ctl_w, ctl_h;
         int small_win_count = 0;
-
-        // clear first_call flag, and 
-        // set display_all flag
-        first_call = false;
-        display_all = true;
-
-        // handle redisplay event
-        if (event.redisplay_event) {
-            event.redisplay_event = false;
-        }
-            
-#ifdef TBD  // XXX later
-        // handle resize event
-        if (event.resize_event) {
-            win_width = (event.resize_w >= WIN_WIDTH_INITIAL ? event.resize_w : WIN_WIDTH_INITIAL);
-            win_height = (event.resize_h >= WIN_HEIGHT_INITIAL ? event.resize_h : WIN_HEIGHT_INITIAL);
-            if ((surface = SDL_SetVideoMode(win_width, win_height, 0, SDL_FLAGS)) == NULL) {
-                FATAL("SDL_SetVideoMode failed\n");
-            }
-            event.resize_event = false;
-        }
-#endif
-
-#ifdef FULLS_SUPPORT  // XXX test with this
-        // handle fulls event
-        if (event.fulls_event) {
-            SDL_WM_ToggleFullScreen(surface);
-            event.fulls_event = false;
-        }
-#endif
-
-        // handle zoom event
-        if (event.zoom_event) {
-            if (zoom == event.zoom_value) {
-                zoom = NO_ZOOM;
-            } else {
-                zoom = event.zoom_value;
-            }
-            event.zoom_event = false;
-        }
 
         // compute new ctl screen element positions
         ctl_x = win_width-CTL_WIDTH; 
@@ -1034,9 +1038,6 @@ void display_handler(void)
         ctl_h = win_height;
         INIT_POS(ctl.ctl_pos, ctl_x, ctl_y, ctl_w, ctl_h);
         INIT_CTL_POS(mode_pos,                0,  0,  8);
-#ifdef FULLS_SUPPORT
-        INIT_CTL_POS(fulls_pos,               0, 10,  1);
-#endif
         INIT_CTL_POS(date_pos,                2,  0, 11);
         INIT_CTL_POS(time_pos,                3,  0, 11);
         INIT_CTL_POS(pb_time_pos,             4,  0, 11);
@@ -1076,7 +1077,7 @@ void display_handler(void)
             int          wc_x, wc_y, wc_w, wc_h, wc_zw;
 
             // set wc_x, wc_y, wc_w, wc_h
-            if (zoom == NO_ZOOM) {
+            if (CONFIG_ZOOM == 'N') {
                 wc_w = (win_width - CTL_WIDTH) / 2;
                 wc_h = win_height / 2;
                 switch (i) {
@@ -1087,7 +1088,7 @@ void display_handler(void)
                 }
             } else {
                 wc_zw = (double)(win_width - CTL_WIDTH) / 1.33;  
-                if (i == zoom) {
+                if (i == CONFIG_ZOOM - 'A') {
                     wc_x = 0;
                     wc_y = 0;
                     wc_w = wc_zw;
@@ -1102,51 +1103,48 @@ void display_handler(void)
             }
             INIT_POS(wcdi->wc_pos, wc_x, wc_y, wc_w, wc_h);
             INIT_POS(wcdi->win_id_pos, 
-                     wc_x + FONTS_CHAR_WIDTH / 2,
+                     wc_x + font_char_width / 2,
                      wc_y + 1, 
-                     2 * FONTS_CHAR_WIDTH, 
-                     FONTS_CHAR_HEIGHT);
+                     2 * font_char_width, 
+                     font_char_height);
             INIT_POS(wcdi->wc_name_pos, 
-                     wc_x + 2 * FONTS_CHAR_WIDTH + FONTS_CHAR_WIDTH / 2,
+                     wc_x + 2 * font_char_width + font_char_width / 2,
                      wc_y + 1, 
-                     (wc_w / FONTS_CHAR_WIDTH - 7) * FONTS_CHAR_WIDTH, 
-                     FONTS_CHAR_HEIGHT);
+                     (wc_w / font_char_width - 7) * font_char_width, 
+                     font_char_height);
             INIT_POS(wcdi->res_pos,    
-                     wc_x + wc_w - 3 * FONTS_CHAR_WIDTH - FONTS_CHAR_WIDTH / 2, 
+                     wc_x + wc_w - 3 * font_char_width - font_char_width / 2, 
                      wc_y + 1, 
-                     3 * FONTS_CHAR_WIDTH, 
-                     FONTS_CHAR_HEIGHT);
+                     3 * font_char_width, 
+                     font_char_height);
             INIT_POS(wcdi->image_pos,
                      wc_x + 1,
-                     wc_y + 1 + FONTS_CHAR_HEIGHT + 1,
+                     wc_y + 1 + font_char_height + 1,
                      wc_w - 2 * 1,
-                     wc_h - FONTS_CHAR_HEIGHT - 3 * 1);
+                     wc_h - font_char_height - 3 * 1);
             INIT_POS(wcdi->image_str1_pos,
                      wcdi->image_pos.x,
-                     wcdi->image_pos.y + wcdi->image_pos.h / 2 - FONTL_CHAR_HEIGHT,
+                     wcdi->image_pos.y + wcdi->image_pos.h / 2 - font_char_height,
                      wcdi->image_pos.w,
-                     FONTL_CHAR_HEIGHT);
+                     font_char_height);
             INIT_POS(wcdi->image_str2_pos,
                      wcdi->image_pos.x,
                      wcdi->image_pos.y + wcdi->image_pos.h / 2,
                      wcdi->image_pos.w,
-                     FONTL_CHAR_HEIGHT);
+                     font_char_height);
             INIT_POS(wcdi->image_str3_pos,
                      wcdi->image_pos.x,
-                     wcdi->image_pos.y + wcdi->image_pos.h / 2 + FONTL_CHAR_HEIGHT,
+                     wcdi->image_pos.y + wcdi->image_pos.h / 2 + font_char_height,
                      wcdi->image_pos.w,
-                     FONTL_CHAR_HEIGHT);
+                     font_char_height);
         }
     }
 
     //
-    // if display_all then clear screen
+    // render clear the entire window
     //
 
-
-    if (display_all) {
-        RENDER_CLEAR_ALL();
-    }
+    RENDER_CLEAR_ALL();
 
     //
     // update the display for each webcam
@@ -1155,107 +1153,54 @@ void display_handler(void)
     for (i = 0; i < MAX_WEBCAM; i++) {
         webcam_t   * wc   = &webcam[i];
         webcamdi_t * wcdi = &webcamdi[i];
-        char         wc_name_str[MAX_STR], res_str[MAX_STR], win_id_str[MAX_STR];
-        uint64_t     curr_time_us = microsec_timer();
+        char         win_id_str[2];
 
         // acquire wc mutex
         pthread_mutex_lock(&wc->image_mutex);
 
         // display border
-        if (display_all || wc->image_highlight != wcdi->image_highlight_last) {
-            RENDER_BORDER(wcdi->wc_pos, wc->image_highlight);
-            wcdi->image_highlight_last = wc->image_highlight;
-        }
+        RENDER_BORDER(wcdi->wc_pos, wc->image_highlight);
 
         // display text line
-        if (display_all) {
-            sprintf(win_id_str, "%c", 'A'+i);
-            RENDER_TEXT(fonts, win_id_str, wcdi->win_id_pos, false, false);
-        }
+        sprintf(win_id_str, "%c", 'A'+i);
+        RENDER_TEXT(win_id_str, wcdi->win_id_pos, false, false);
+        RENDER_TEXT(wc->image_wc_name, wcdi->wc_name_pos, true, false);
+        RENDER_TEXT(wc->image_wc_res, wcdi->res_pos, ctl.mode.mode == MODE_LIVE, false);
 
-        if (event.wc_name_input_in_prog[i]) {
-            strcpy(wc_name_str, event.text_input_str);
-            if ((curr_time_us % 1000000) < 500000) {
-                strcat(wc_name_str, "_");
-            } else {
-                strcat(wc_name_str, " ");
-            }
-            int field_width    = wcdi->wc_name_pos.w / FONTS_CHAR_WIDTH;
-            int len_wc_name_str = strlen(wc_name_str);
-            if (len_wc_name_str > field_width) {
-                memmove(wc_name_str, 
-                        wc_name_str + (len_wc_name_str - field_width),
-                        field_width + 1);
-            }
-        } else if (wc->image_wc_name[0] != '\0') {
-            strcpy(wc_name_str, wc->image_wc_name);
-        } else {
-            strcpy(wc_name_str, "?");
-        }
-        if (display_all || strcmp(wc_name_str,wcdi->wc_name_last)) {
-            RENDER_TEXT(fonts, wc_name_str, wcdi->wc_name_pos, true, false);
-            strcpy(wcdi->wc_name_last, wc_name_str);
-        }
-
-        strcpy(res_str, 
-               (wc->image_display != IMAGE_DISPLAY_IMAGE ? "   " :
-                wc->image_w == 640                       ? "HI " :
-                wc->image_w == 320                       ? "MED" :
-                wc->image_w == 160                       ? "LOW" :
-                                                           "?  "));
-        if (display_all || strcmp(res_str,wcdi->res_str_last) || ctl.mode.mode != wcdi->mode_last) {
-            RENDER_TEXT(fonts, res_str, wcdi->res_pos, ctl.mode.mode == MODE_LIVE, false);
-            strcpy(wcdi->res_str_last, res_str);
-            wcdi->mode_last = ctl.mode.mode;
-        }
-
-        // display image or text
-        if (display_all || wc->image_update_request) {
-            // clear image update request flag
-            wc->image_update_request = false;
-
-            // display image
-            if (wc->image_display == IMAGE_DISPLAY_IMAGE) {
-                // create new texture, if needed
-                if (wcdi->texture == NULL || wcdi->texture_w != wc->image_w || wcdi->texture_h != wc->image_h) {
-                    wcdi->texture_w = wc->image_w;
-                    wcdi->texture_h = wc->image_h;
-                    if (wcdi->texture != NULL) {
-                        SDL_DestroyTexture(wcdi->texture);
-                    }
-                    wcdi->texture = SDL_CreateTexture(renderer, 
-                                                       SDL_PIXELFORMAT_YUY2,
-                                                       SDL_TEXTUREACCESS_STREAMING,  // XXX locking ?
-                                                       wcdi->texture_w,
-                                                       wcdi->texture_h);
-                    if (wcdi->texture == NULL) {
-                        ERROR("SDL_CreateTexture failed\n");
-                        exit(1);
-                    }
-                    DEBUG("created new texture %dx%d\n", wcdi->texture_w, wcdi->texture_h);
+        // display image pane
+        if (wc->image_display == IMAGE_DISPLAY_IMAGE) {
+            // create new texture, if needed
+            if (wcdi->texture == NULL || wcdi->texture_w != wc->image_w || wcdi->texture_h != wc->image_h) {
+                wcdi->texture_w = wc->image_w;
+                wcdi->texture_h = wc->image_h;
+                if (wcdi->texture != NULL) {
+                    SDL_DestroyTexture(wcdi->texture);
                 }
-
-                // update the texture with the image pixels  XXX LOCKING ?
-                SDL_UpdateTexture(wcdi->texture,
-                                  NULL,            // update entire texture
-                                  wc->image,       // pixels
-                                  wc->image_w*2);  // pitch
-
-                // copy the texture to the render target
-                SDL_RenderCopy(renderer, wcdi->texture, NULL, &wcdi->image_pos);
-
-                // set the display_updated flag so that RenderPresent will be called at the end of this routine
-                display_updated = true; 
+                wcdi->texture = SDL_CreateTexture(renderer, 
+                                                   SDL_PIXELFORMAT_YUY2,
+                                                   SDL_TEXTUREACCESS_STREAMING,  // YYY locking ?
+                                                   wcdi->texture_w,
+                                                   wcdi->texture_h);
+                if (wcdi->texture == NULL) {
+                    ERROR("SDL_CreateTexture failed\n");
+                    exit(1);
+                }
+                DEBUG("created new texture %dx%d\n", wcdi->texture_w, wcdi->texture_h);
             }
 
-            // display text
-            if (wc->image_display == IMAGE_DISPLAY_TEXT) {
-                // clear image and display strings   
-                RENDER_CLEAR_RECT(wcdi->image_pos);
-                RENDER_TEXT(fontl, wc->image_str1, wcdi->image_str1_pos, false, true);
-                RENDER_TEXT(fontl, wc->image_str2, wcdi->image_str2_pos, false, true);
-                RENDER_TEXT(fontl, wc->image_str3, wcdi->image_str3_pos, false, true);
-            }
+            // update the texture with the image pixels  YYY LOCKING ?
+            SDL_UpdateTexture(wcdi->texture,
+                              NULL,            // update entire texture
+                              wc->image,       // pixels
+                              wc->image_w*2);  // pitch
+
+            // copy the texture to the render target
+            SDL_RenderCopy(renderer, wcdi->texture, NULL, &wcdi->image_pos);
+        } else {
+            // YYY more lines
+            RENDER_TEXT(wc->image_str1, wcdi->image_str1_pos, false, true);
+            RENDER_TEXT(wc->image_str2, wcdi->image_str2_pos, false, true);
+            RENDER_TEXT(wc->image_str3, wcdi->image_str3_pos, false, true);
         }
 
         // relsease wc mutex
@@ -1263,13 +1208,151 @@ void display_handler(void)
     }
 
     //
-    // display control/status ...
+    // display control/status pane
     //
 
+    if (ctl.mode.mode == MODE_LIVE) {
+        // LIVE MODE ...
+        //
+        //       123456789 1
+        //       -----------
+        // 00:   LIVE      
+        // 01:
+        // 02:   06/07/58
+        // 03:   11:12:13
+
+        RENDER_TEXT(MODE_STR(ctl.mode.mode), ctl.mode_pos, true, false);
+        date_and_time_str[8] = '\0';
+        RENDER_TEXT(date_and_time_str, ctl.date_pos, false, false);
+        RENDER_TEXT(date_and_time_str+9, ctl.time_pos, false, false);
+    } else {  // ctl.mode.mode == MODE_PLAYBACK
+        // PLAYBACK MODE ...
+        //
+        // YYY tbd
+    }
+
+    // CONNECTION INFO ...
+    //
+    //       123456789 1
+    //       -----------
+    // 23:   RATE Mb/Sec    (and other modes)
+    // 24:   A 3.123
+    // 25:   B 3.123
+    // 26:   C 3.123
+    // 27:   D 3.123
+
+//YYY add FPS
+    switch (con_info_select) {
+    case 0: {
+        char str[32];
+
+        RENDER_TEXT("TOTAL MB", ctl.con_info_title_pos, true, false);
+        for (i = 0; i < MAX_WEBCAM; i++) {
+            sprintf(str, "%c %5d", 'A'+i, (int)(webcam[i].recvd_bytes/1000000));
+            RENDER_TEXT(str, ctl.con_info_pos[i], false, false);
+        }
+        break; }
+    case 1: {
+        uint64_t        delta_us;
+        uint64_t        curr_us = microsec_timer();
+
+        static uint64_t last_us;
+        static uint64_t last_recvd_bytes[MAX_WEBCAM];
+        static char     str[MAX_WEBCAM][32];
+        
+        // if greater then 1 second since last values saved then
+        //   if less then 5 secs then
+        //     recompute rates
+        //   endif
+        //   save last values
+        // endif
+        delta_us = curr_us - last_us;
+        if (delta_us > 1000*MS) {
+            if (delta_us < 5000*MS) {
+                for (i = 0; i < MAX_WEBCAM; i++) {
+                    sprintf(str[i], "%c %5.3f", 
+                            'A'+i,
+                            8.0 * (webcam[i].recvd_bytes - last_recvd_bytes[i]) / delta_us);
+                }
+            } else {
+                for (i = 0; i < MAX_WEBCAM; i++) {
+                    sprintf(str[i], "%c ---", 'A'+i);
+                }
+            }
+            for (i = 0; i < MAX_WEBCAM; i++) {
+                last_recvd_bytes[i] = webcam[i].recvd_bytes;
+            }
+            last_us = curr_us;
+        }
+
+        // display
+        RENDER_TEXT("RATE Mb/S", ctl.con_info_title_pos, true, false);
+        for (i = 0; i < MAX_WEBCAM; i++) {
+            RENDER_TEXT(str[i], ctl.con_info_pos[i], false, false);
+        }
+        break; }
+    case 2: {
+        char str[32];
+
+        RENDER_TEXT("P2P SND DUP", ctl.con_info_title_pos, true, false);
+        for (i = 0; i < MAX_WEBCAM; i++) {
+            sprintf(str, "%c %4d %4d",
+                    'A'+i, 
+                    webcam[i].status.p2p_resend_cnt,  //YYY where are these from
+                    webcam[i].status.p2p_recvdup_cnt);
+            RENDER_TEXT(str, ctl.con_info_pos[i], false, false);
+        }
+        break; }
+    }
+
+    //
+    // render present
+    //
+
+    RENDER_PRESENT();
+}
+
+void render_text(char * str, SDL_Rect pos, bool ctl, bool centered)
+{
+    SDL_Surface    * surface; 
+    SDL_Texture    * texture; 
+
+    static SDL_Color fg_color_normal = {255,255,255}; 
+    static SDL_Color fg_color_ctl    = {0,255,255}; 
+    static SDL_Color bg_color        = {0,0,0}; 
+
+    // YYY tbd reduce strlen if too long
+
+    surface = TTF_RenderText_Shaded(font, str, ctl ? fg_color_ctl : fg_color_normal, bg_color); 
+    if (surface == NULL) { 
+        return;
+    } 
+
+    texture = SDL_CreateTextureFromSurface(renderer, surface); 
+
+    if (!centered || surface->w >= pos.w) { 
+        pos.w = surface->w; 
+    } else { 
+        pos.x += (pos.w - surface->w) / 2; 
+        pos.w = surface->w; 
+    } 
+
+    SDL_RenderCopy(renderer, texture, NULL, &pos); 
+    SDL_FreeSurface(surface); 
+    SDL_DestroyTexture(texture); 
+}
+
+#if 0
+YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY
+YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY
+YYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYYY
+
+// YYY redo this pane
+// YYY android needs quit button for pgm
     //
     //     123456789 1
     //     -----------
-    // 00: PLAYBACK  F
+    // 00: PLAYBACK  
     // 01:
     // 02: 06/07/58
     // 03: 11:12:13
@@ -1311,7 +1394,6 @@ void display_handler(void)
     mode_change = (ctl.mode.mode_id != mode_id_last);
     mode_id_last = ctl.mode.mode_id;
     if (mode_change) {
-        RENDER_CLEAR_RECT(ctl.ctl_pos);
     }
 
     // determine if there has been a seconds time tick
@@ -1324,39 +1406,18 @@ void display_handler(void)
 
     // update mode
     if (display_all || mode_change) {
-        RENDER_TEXT(fonts, MODE_STR(ctl.mode.mode), ctl.mode_pos, true, false);
+        RENDER_TEXT(MODE_STR(ctl.mode.mode), ctl.mode_pos, true, false);
     }
-
-#ifdef FULLS_SUPPORT
-    // update full screen control
-    if (display_all || mode_change) {
-        RENDER_TEXT(fonts, "F", ctl.fulls_pos, true, false);
-    }
-#endif
 
     // update date and time
     if (display_all || mode_change || time_sec_tick || (ctl.mode.mode == MODE_PLAYBACK && ctl.mode.pb_speed > 1)) {
-        char date_and_time_str[MAX_TIME_STR];
-        time_t secs;
-        if (ctl.mode.mode == MODE_LIVE) {
-            secs = time(NULL);
-        } else {
-            if (ctl.mode.pb_submode == PB_SUBMODE_PLAY) {
-                secs = PB_SUBMODE_PLAY_REAL_TIME_US(&ctl.mode) / 1000000;
-            } else {
-                secs = ctl.mode.pb_real_time_us / 1000000;
-            }
-        }
-        time2str(date_and_time_str, secs, opt_zulu_time);
-        if (opt_zulu_time) {
-            strcpy(date_and_time_str+17, " Z");
-        }
         date_and_time_str[8] = '\0';
-        RENDER_TEXT(fonts, date_and_time_str, ctl.date_pos, false, false);
-        RENDER_TEXT(fonts, date_and_time_str+9, ctl.time_pos, false, false);
+        RENDER_TEXT(date_and_time_str, ctl.date_pos, false, false);
+        RENDER_TEXT(date_and_time_str+9, ctl.time_pos, false, false);
     }
 
     // update playback time
+    // YYY don't need this
     if ((ctl.mode.mode == MODE_PLAYBACK) &&
         (display_all || mode_change || time_sec_tick || ctl.mode.pb_speed > 1))
     {
@@ -1382,7 +1443,7 @@ void display_handler(void)
 
         sprintf(playback_time_str, "%s%d:%02d:%02d", sign_str, 24*days+hours, minutes, seconds);
 
-        RENDER_TEXT(fonts, playback_time_str, ctl.pb_time_pos, false, false);
+        RENDER_TEXT(playback_time_str, ctl.pb_time_pos, false, false);
     }
 
     // update playback state
@@ -1420,13 +1481,13 @@ void display_handler(void)
 
         // init speed_str
         if (event.pb_speed_input_in_prog) {
-            strcpy(speed_str, event.text_input_str);
+            strcpy(speed_str, event.text_input_str); //YYY 
             if ((curr_time_us % 1000000) < 500000) {
                 strcat(speed_str, "_");
             } else {
                 strcat(speed_str, " ");
             }
-            int field_width    = ctl.pb_speed_value_pos.w / FONTS_CHAR_WIDTH;
+            int field_width    = ctl.pb_speed_value_pos.w / font_char_width;
             int len_speed_str = strlen(speed_str);
             if (len_speed_str > field_width) {
                 memmove(speed_str, 
@@ -1442,31 +1503,32 @@ void display_handler(void)
         }
 
         // render text for playback state
-        RENDER_TEXT(fonts, state_str,      ctl.pb_state_pos,       false, false);
-        RENDER_TEXT(fonts, "STOP",         ctl.pb_stop_pos,        true,  false);
-        RENDER_TEXT(fonts, play_pause_str, ctl.pb_play_pause_pos,  true,  false);
-        RENDER_TEXT(fonts, "DIR",          ctl.pb_dir_label_pos,   false, false);
-        RENDER_TEXT(fonts, dir_str,        ctl.pb_dir_value_pos,   true,  false);
-        RENDER_TEXT(fonts, "SPEED",        ctl.pb_speed_label_pos, false, false);
-        RENDER_TEXT(fonts, speed_str,      ctl.pb_speed_value_pos, true,  false);
+        RENDER_TEXT(state_str,      ctl.pb_state_pos,       false, false);
+        RENDER_TEXT("STOP",         ctl.pb_stop_pos,        true,  false);
+        RENDER_TEXT(play_pause_str, ctl.pb_play_pause_pos,  true,  false);
+        RENDER_TEXT("DIR",          ctl.pb_dir_label_pos,   false, false);
+        RENDER_TEXT(dir_str,        ctl.pb_dir_value_pos,   true,  false);
+        RENDER_TEXT("SPEED",        ctl.pb_speed_label_pos, false, false);
+        RENDER_TEXT(speed_str,      ctl.pb_speed_value_pos, true,  false);
     }
 
     // update playback time control
+    // YYY these are too close togethor
     if ((ctl.mode.mode == MODE_PLAYBACK) &&
         (display_all || mode_change)) 
     {
-        RENDER_TEXT(fonts, "SEC",   ctl.pb_sec_pos,       false, false);
-        RENDER_TEXT(fonts, "-",     ctl.pb_sec_minus_pos, true,  false);
-        RENDER_TEXT(fonts, "+",     ctl.pb_sec_plus_pos,  true,  false);
-        RENDER_TEXT(fonts, "MIN",   ctl.pb_min_pos,       false, false);
-        RENDER_TEXT(fonts, "-",     ctl.pb_min_minus_pos, true,  false);
-        RENDER_TEXT(fonts, "+",     ctl.pb_min_plus_pos,  true,  false);
-        RENDER_TEXT(fonts, "HOUR",  ctl.pb_hour_pos,      false, false);
-        RENDER_TEXT(fonts, "-",     ctl.pb_hour_minus_pos,true,  false);
-        RENDER_TEXT(fonts, "+",     ctl.pb_hour_plus_pos, true,  false);
-        RENDER_TEXT(fonts, "DAY",   ctl.pb_day_pos,       false, false);
-        RENDER_TEXT(fonts, "-",     ctl.pb_day_minus_pos, true,  false);
-        RENDER_TEXT(fonts, "+",     ctl.pb_day_plus_pos,  true,  false);
+        RENDER_TEXT("SEC",   ctl.pb_sec_pos,       false, false);
+        RENDER_TEXT("-",     ctl.pb_sec_minus_pos, true,  false);
+        RENDER_TEXT("+",     ctl.pb_sec_plus_pos,  true,  false);
+        RENDER_TEXT("MIN",   ctl.pb_min_pos,       false, false);
+        RENDER_TEXT("-",     ctl.pb_min_minus_pos, true,  false);
+        RENDER_TEXT("+",     ctl.pb_min_plus_pos,  true,  false);
+        RENDER_TEXT("HOUR",  ctl.pb_hour_pos,      false, false);
+        RENDER_TEXT("-",     ctl.pb_hour_minus_pos,true,  false);
+        RENDER_TEXT("+",     ctl.pb_hour_plus_pos, true,  false);
+        RENDER_TEXT("DAY",   ctl.pb_day_pos,       false, false);
+        RENDER_TEXT("-",     ctl.pb_day_minus_pos, true,  false);
+        RENDER_TEXT("+",     ctl.pb_day_plus_pos,  true,  false);
     }
 
     // update playback record duration
@@ -1485,81 +1547,16 @@ void display_handler(void)
                 sprintf(record_dur_str, "%c", 'A'+i);
             }
 
-            RENDER_TEXT(fonts, record_dur_str, ctl.pb_record_dur_pos[i], false, false);
+            RENDER_TEXT(record_dur_str, ctl.pb_record_dur_pos[i], false, false);
         }
     }
-
-    // update connection info
-    // XXX add connect-time stat
-    if (display_all || mode_change || curr_time_us - last_con_info_display_time_us > 2000000 || event.con_info_event) {
-        int        i;
-        char       str[32];
-        static int con_info_select;
-
-        if (event.con_info_event) {
-            event.con_info_event = false;
-            con_info_select = (con_info_select + 1) % 3;
-        }
-
-        switch (con_info_select) {
-        case 0:
-            RENDER_TEXT(fonts, "TOTAL MB", ctl.con_info_title_pos, true, false);
-            for (i = 0; i < MAX_WEBCAM; i++) {
-                sprintf(str, "%c %d.%3.3d", 
-                        'A'+i, 
-                        (int)(webcam[i].recvd_bytes/1000000), 
-                        (int)((webcam[i].recvd_bytes%1000000)/1000));
-                RENDER_TEXT(fonts, str, ctl.con_info_pos[i], false, false);
-            }
-            break;
-        case 1: {
-            uint64_t delta_us;
-            double   mbit_per_sec;
-
-            delta_us = (last_con_info_display_time_us != 0
-                        ? (curr_time_us - last_con_info_display_time_us)
-                        : 0);
-            RENDER_TEXT(fonts, "RATE Mb/S", ctl.con_info_title_pos, true, false);
-            for (i = 0; i < MAX_WEBCAM; i++) {
-                mbit_per_sec = (delta_us != 0 
-                                ? 8.0 * (webcam[i].recvd_bytes - webcamdi[i].recvd_bytes_last) / delta_us
-                                : 0.0);
-                sprintf(str, "%c %5.3f", 'A'+i, mbit_per_sec);
-                RENDER_TEXT(fonts, str, ctl.con_info_pos[i], false, false);
-            }
-            break; }
-        case 2:
-            RENDER_TEXT(fonts, "P2P SND DUP", ctl.con_info_title_pos, true, false);
-            for (i = 0; i < MAX_WEBCAM; i++) {
-                sprintf(str, "%c %4d %4d",
-                        'A'+i, 
-                        webcam[i].status.p2p_resend_cnt,
-                        webcam[i].status.p2p_recvdup_cnt);
-                RENDER_TEXT(fonts, str, ctl.con_info_pos[i], false, false);
-            }
-            break;
-        }
-
-        for (i = 0; i < MAX_WEBCAM; i++) {
-            webcamdi[i].recvd_bytes_last = webcam[i].recvd_bytes;
-        }
-        last_con_info_display_time_us = curr_time_us;
-    }
-
-    // if updates have been made then present the display
-    if (display_updated) {
-        RENDER_PRESENT();
-    };
-}
+#endif
 
 // -----------------  WEBCAM THREAD  -------------------------------------
 
 void * webcam_thread(void * cx) 
 {
-    int                 id                        = (int)(long)cx;
-    char                id_char                   = 'A' + id;
-    webcam_t          * wc                        = &webcam[id];
-    struct wc_event_s * wcev                      = &event.wc[id];
+    #define INVALID_HANDLE (-1)
 
     #define STATE_CHANGE(new_state, s1, s2, s3) \
         do { \
@@ -1570,21 +1567,24 @@ void * webcam_thread(void * cx)
             DISPLAY_TEXT(s1,s2,s3); \
         } while (0)
 
-    #define DISPLAY_IMAGE(_image, _motion) \
+    #define RESOLUTION_STR(w,h) ((w) == 640 ? "HI" : (w) == 320 ? "MED" : (w) == 160 ? "LOW" : "???")
+
+    #define DISPLAY_IMAGE(_image, _width, _height, _motion) \
         do { \
             pthread_mutex_lock(&wc->image_mutex); \
             if (_motion) { \
                 wc->image_highlight = true; \
                 wc->last_highlight_enable_time_us = microsec_timer(); \
             } \
+            strcpy(wc->image_wc_res, RESOLUTION_STR(_width,_height)); \
             if (wc->image) { \
                 free(wc->image); \
             } \
             wc->image = (_image); \
-            wc->image_w = width; \
-            wc->image_h = height; \
+            wc->image_w = (_width); \
+            wc->image_h = (_height); \
             wc->image_display = IMAGE_DISPLAY_IMAGE;  \
-            wc->image_update_request = true;  \
+            wc->image_change++; \
             pthread_mutex_unlock(&wc->image_mutex); \
         } while (0)
 
@@ -1593,11 +1593,12 @@ void * webcam_thread(void * cx)
             DEBUG("wc %c: DISPLAY_TEXT: %s - %s - %s\n", id_char, s1, s2, s3); \
             pthread_mutex_lock(&wc->image_mutex); \
             wc->image_highlight = false; \
+            strcpy(wc->image_wc_res, ""); \
             strcpy(wc->image_str1, s1); \
             strcpy(wc->image_str2, s2); \
             strcpy(wc->image_str3, s3); \
             wc->image_display = IMAGE_DISPLAY_TEXT; \
-            wc->image_update_request = true; \
+            wc->image_change++; \
             pthread_mutex_unlock(&wc->image_mutex); \
         } while (0)
 
@@ -1608,6 +1609,7 @@ void * webcam_thread(void * cx)
             } \
             pthread_mutex_lock(&wc->image_mutex); \
             wc->image_highlight = false; \
+            wc->image_change++; \
             pthread_mutex_unlock(&wc->image_mutex); \
         } while (0)
 
@@ -1615,21 +1617,44 @@ void * webcam_thread(void * cx)
         do { \
             pthread_mutex_lock(&wc->image_mutex); \
             strcpy(wc->image_wc_name, (dn)); \
+            wc->image_change++; \
             pthread_mutex_unlock(&wc->image_mutex); \
         } while (0)
 
-    __sync_fetch_and_add(&webcam_threads_running_count,1);
+    int                 id                        = (int)(long)cx;
+    char                id_char                   = 'A' + id;
+    webcam_t          * wc                        = &webcam[id];
+    struct wc_event_s * wcev                      = &event.wc[id];
+    p2p_routines_t    * p2p;
 
-    STATE_CHANGE(STATE_NO_WC_ID_STR, "NO SELECTION", "", "");
+    DEBUG("THREAD %d STARTING\n", id);
+
+    // YYY needs a dropdown for selecting the webcam
+
+    pthread_mutex_init(&wc->image_mutex,NULL);
+
+    p2p = (CONFIG_PROTOCOL == '1' ? &p2p1 : &p2p2);   // YYY change when protocol has changed
+
+
+    wc->handle = INVALID_HANDLE;
+
+    DISPLAY_WC_NAME(CONFIG_WC_NAME(id));
+    if (wc->image_wc_name[0] != '\0') {
+        STATE_CHANGE(STATE_CONNECTING, "CONNECTING", "", "");
+    } else {
+        STATE_CHANGE(STATE_NO_WC_ID_STR, "NO SELECTION", "", "");
+    }
+
+    __sync_fetch_and_add(&webcam_threads_running_count,1);
 
     while (true) {
         // wc_name event processing
         if (wcev->wc_name_event) {
-            if (wc->handle != NO_HANDLE) {
+            if (wc->handle != INVALID_HANDLE) {
                 p2p_disconnect(wc->handle);
-                wc->handle = NO_HANDLE;
+                wc->handle = INVALID_HANDLE;
             }
-            DISPLAY_WC_NAME(wcev->wc_name);
+            DISPLAY_WC_NAME(wcev->wc_name);  //YYY config update wehn this is changed
             wcev->wc_name_event = false;
             if (wc->image_wc_name[0] != '\0') {
                 STATE_CHANGE(STATE_CONNECTING, "CONNECTING", "", "");
@@ -1650,15 +1675,15 @@ void * webcam_thread(void * cx)
         // state processing
         switch (wc->state) {
         case STATE_NO_WC_ID_STR:
-            usleep(SLEEP_US);
+            usleep(100*MS);
             break;
 
         case STATE_CONNECTING: {
             int h;
 
             // attempt to connect to wc_name
-            DEBUG("wc %c: STATE_CONNECTING connected to %s\n", id_char, wc->wc_name);
-            h = p2p_connect(user_name, password, wc->image_wc_name, SERVICE_WEBCAM);
+            DEBUG("wc %c: STATE_CONNECTING connected to %s\n", id_char, wc->image_wc_name);
+            h = p2p_connect(CONFIG_USERNAME, CONFIG_PASSWORD, wc->image_wc_name, SERVICE_WEBCAM);
             if (h < 0) {
                 STATE_CHANGE(STATE_CONNECTING_ERROR, "CONNECT ERROR", "", "");
                 break;
@@ -1672,7 +1697,7 @@ void * webcam_thread(void * cx)
             wc->last_dead_text_display_time_us = microsec_timer();
             wc->last_highlight_enable_time_us = microsec_timer();
             wc->last_frame_status = STATUS_INFO_OK;
-            wc->last_zoom = INVALID_ZOOM;
+            wc->last_zoom = 'X';  // invalid zoom value
             bzero(&wc->mode, sizeof(struct mode_s));
             bzero(&wc->status, sizeof(struct status_s));
             STATE_CHANGE(STATE_CONNECTED, "CONNECTED", "", "");
@@ -1724,9 +1749,10 @@ void * webcam_thread(void * cx)
             }
 
             // if zoom has changed then send message to webcam
-            tmp_zoom = zoom;
+            // YYY comment
+            tmp_zoom = CONFIG_ZOOM;
             if (tmp_zoom != wc->last_zoom) {
-                uint64_t intvl_us = (tmp_zoom == id ? 0 : tmp_zoom == NO_ZOOM ? 150000 : 250000);
+                uint64_t intvl_us = (tmp_zoom == id ? 0 : tmp_zoom == 'N' ? 150*MS : 250*MS);
 
                 DEBUG("wc %c: send MSG_TYPE_CMD_SET_MIN_SEND_INTVL_US intvl=%"PRId64" us\n", id_char, intvl_us);
                 bzero(&msg,sizeof(msg));
@@ -1749,7 +1775,7 @@ void * webcam_thread(void * cx)
                         break;
                     }
                     DISPLAY_TEXT(status2str(STATUS_INFO_CHANGING_RESOLUTION), "", "");
-                    usleep(LONG_SLEEP_US);
+                    usleep(500*MS);  // YYY does this work?
                 }
                 wcev->res_event = false;
             }
@@ -1773,12 +1799,13 @@ void * webcam_thread(void * cx)
             }
 
             // receive msg header  
+            // YYY check for quit
             ret = p2p_recv(wc->handle, &msg, sizeof(msg), RECV_NOWAIT_ALL);
             if (ret != sizeof(msg)) {
                 if (ret != RECV_WOULDBLOCK) {
                     STATE_CHANGE(STATE_CONNECTED_ERROR, "ERROR", "recv msg hdr", "");
                 }
-                usleep(SHORT_SLEEP_US);
+                usleep(MS);
                 break;
             }
             wc->recvd_bytes += ret;
@@ -1858,7 +1885,7 @@ void * webcam_thread(void * cx)
 
                 // display the image
                 wc->last_frame_status = STATUS_INFO_OK;
-                DISPLAY_IMAGE(image, msg.u.mt_frame.motion);
+                DISPLAY_IMAGE(image, width, height, msg.u.mt_frame.motion);
                 break;
 
             case MSG_TYPE_STATUS:
@@ -1883,12 +1910,12 @@ void * webcam_thread(void * cx)
 
         case STATE_CONNECTING_ERROR:
         case STATE_CONNECTED_ERROR:
-            if (wc->handle != NO_HANDLE) {
+            if (wc->handle != INVALID_HANDLE) {
                 p2p_disconnect(wc->handle);
-                wc->handle = NO_HANDLE;
+                wc->handle = INVALID_HANDLE;
             }
             if (microsec_timer() - wc->last_state_change_time_us < RECONNECT_TIME_US) {
-                usleep(SLEEP_US);
+                usleep(100*MS);
                 break;
             }
             STATE_CHANGE(STATE_CONNECTING, "CONNECTING", "", "");
@@ -1912,9 +1939,9 @@ void * webcam_thread(void * cx)
     }
 
     // disconnect
-    if (wc->handle != NO_HANDLE) {
+    if (wc->handle != INVALID_HANDLE) {
         p2p_disconnect(wc->handle);
-        wc->handle = NO_HANDLE;
+        wc->handle = INVALID_HANDLE;
     }
 
     // exit thread
@@ -1924,6 +1951,7 @@ void * webcam_thread(void * cx)
 
 // -----------------  DEBUG THREAD  -------------------------------------------------
 
+#ifndef ANDROID
 void * debug_thread(void * cx)
 {
     int    argc;
@@ -1952,6 +1980,7 @@ void * debug_thread(void * cx)
             continue;
         }
 
+#if 0 // YYY
         // cmd: p2p_debug_con 
         if (strcmp(argv[0], "p2p_debug_con") == 0) {
             int handle;
@@ -1980,6 +2009,7 @@ void * debug_thread(void * cx)
             p2p_monitor_ctl(handle, secs);
             continue;
         }
+#endif
     }
 
     // eof on debug input
@@ -2011,3 +2041,4 @@ bool getcl(int * argc, char ** argv)
         }
     }
 }
+#endif
