@@ -59,7 +59,7 @@ int main(int argc, char **argv)
 {
     struct rlimit  rl;
     pthread_t      thread;
-    int            i, ret, handle, service;
+    int            i, ret, tries, handle, service;
     char           user_name[MAX_USER_NAME+1];
     char           opt_char;
     pthread_attr_t thread_attr;
@@ -91,9 +91,17 @@ int main(int argc, char **argv)
     logmsg_init(debug_mode == 0 ? "wc_server.log" : "stderr");
 
     // get the wc_macaddr, this is used to identify this webcam in the wc_announce dgram
-    ret = getmacaddr(wc_macaddr);
-    if (ret < 0) {
-        FATAL("unable to read wc_macaddr\n");
+    tries = 0;
+    while (true) {
+        if (getmacaddr(wc_macaddr) < 0) {
+            break;
+        }
+        if (++tries < 10) {
+            WARN("unable to read wc_macaddr, retrying\n");
+        } else {
+            FATAL("unable to read wc_macaddr\n");
+        }
+        sleep(5);
     }
     INFO("wc_macaddr: %s\n", wc_macaddr);
 
@@ -124,6 +132,7 @@ int main(int argc, char **argv)
         handle = p2p_accept(wc_macaddr, &service, user_name);
         if (handle < 0) {
             ERROR("p2p_accept failed\n");
+            sleep(10);
             continue;
         }
 
