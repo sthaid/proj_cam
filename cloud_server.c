@@ -76,7 +76,8 @@ void * service_accept_thread(void * arg);
 void account_init(void);
 void account_create(int sockfd, char * user_name, char * password);
 void * account_login_thread(void * cx);
-void cmd_processor(user_t * u, FILE * fp);
+void * account_command_thread(void * cx);
+void cmd_processor(user_t * u, FILE * fp, bool single_cmd);
 bool cmd_help(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_add_wc(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_ren_wc(user_t * u, FILE * fp, int argc, char ** argv);
@@ -316,6 +317,26 @@ void * service_accept_thread(void * cx)
             pthread_create(&thread, NULL, account_login_thread, (void*)(((long)sockfd << 16) | i));
             sockfd = -1;
 
+        // if service is 'command' then
+        } else if (strcmp(service, "command") == 0) {
+            // verify user_name and verify password, returns -1 or user tbl idx
+            i = verify_user_name_and_password(user_name, password);
+            if (i == -1) {
+                sprintf(s,"invalid user_name or password");
+                write(sockfd,s,strlen(s));
+                continue;
+            }
+
+            // write value to socket to indicate login is okay
+            login_okay = CLOUD_SERVER_LOGIN_OK;
+            if (write(sockfd,&login_okay,sizeof(login_okay)) != sizeof(login_okay)) {
+                continue;
+            }
+
+            // create account_command_thread
+            pthread_create(&thread, NULL, account_command_thread, (void*)(((long)sockfd << 16) | i));
+            sockfd = -1;
+
         // if service is 'nettest' then
         } else if (strcmp(service, "nettest") == 0) {
             // verify user_name and verify password, returns -1 or user tbl idx
@@ -364,7 +385,7 @@ void * service_accept_thread(void * cx)
     return NULL;
 }
 
-// ----------------- SERVICE - ACCOUNT CREATE AND LOGIN  ----------
+// ----------------- SERVICE - ACCOUNT CREATE, LOGIN, AND COMMAND  ----------
 
 void account_init(void)
 {
@@ -447,6 +468,70 @@ done:
     fclose(fp);
 }
 
+void * account_login_thread(void * cx)
+{
+    FILE   * fp;
+    user_t * u;
+    int      user_idx, sockfd;
+
+    // detach because this thread will not be joined
+    pthread_detach(pthread_self());
+
+    // init
+    user_idx = (long)cx & 0xffff;
+    sockfd = (long)cx >> 16;
+    u = &user[user_idx];
+    fp = fdopen(sockfd, "w+");   // mode: read/write
+    if (fp == NULL) {
+        ERROR("fdopen\n");
+        close(sockfd);
+        return NULL;
+    }
+    setlinebuf(fp);
+
+    // set thread local storage flag to indicate this thread is privleged
+    is_root = IS_ROOT(u);
+
+    // call cmd_processor
+    cmd_processor(u, fp, false);
+
+    // done
+    fclose(fp);
+    return NULL;
+}
+
+void * account_command_thread(void * cx)
+{
+    FILE   * fp;
+    user_t * u;
+    int      user_idx, sockfd;
+
+    // detach because this thread will not be joined
+    pthread_detach(pthread_self());
+
+    // init
+    user_idx = (long)cx & 0xffff;
+    sockfd = (long)cx >> 16;
+    u = &user[user_idx];
+    fp = fdopen(sockfd, "w+");   // mode: read/write
+    if (fp == NULL) {
+        ERROR("fdopen\n");
+        close(sockfd);
+        return NULL;
+    }
+    setlinebuf(fp);
+
+    // set thread local storage flag to indicate this thread is privleged
+    is_root = IS_ROOT(u);
+
+    // call cmd_processor
+    cmd_processor(u, fp, true);
+
+    // done
+    fclose(fp);
+    return NULL;
+}
+
 typedef struct {
     char * name;
     bool (*proc)(user_t * u, FILE * fp, int argc, char ** argv);
@@ -484,39 +569,7 @@ cmd_tbl_t cmd_tbl[] = {
 
 #define MAX_CMD_TBL (sizeof(cmd_tbl) / sizeof(cmd_tbl[0]))
 
-void * account_login_thread(void * cx)
-{
-    FILE   * fp;
-    user_t * u;
-    int      user_idx, sockfd;
-
-    // detach because this thread will not be joined
-    pthread_detach(pthread_self());
-
-    // init
-    user_idx = (long)cx & 0xffff;
-    sockfd = (long)cx >> 16;
-    u = &user[user_idx];
-    fp = fdopen(sockfd, "w+");   // mode: read/write
-    if (fp == NULL) {
-        ERROR("fdopen\n");
-        close(sockfd);
-        return NULL;
-    }
-    setlinebuf(fp);
-
-    // set thread local storage flag to indicate this thread is privleged
-    is_root = IS_ROOT(u);
-
-    // call cmd_processor
-    cmd_processor(u, fp);
-
-    // done
-    fclose(fp);
-    return NULL;
-}
-
-void cmd_processor(user_t * u, FILE * fp)
+void cmd_processor(user_t * u, FILE * fp, bool single_cmd)
 {
     char     b[MAX_GETCL_BUFF];
     char   * argv[MAX_GETCL_ARGV];
@@ -525,15 +578,23 @@ void cmd_processor(user_t * u, FILE * fp)
 
     // loop, read and process cmd
     while (true) {
-        // issue prompt and get client command
-        prcl(fp, "%s%s> ", is_root ? "(root) " : "", u->user_name);
+        // issue prompt 
+        if (!single_cmd) {
+            prcl(fp, "%s%s> ", is_root ? "(root) " : "", u->user_name);
+        }
+
+        // get client command
         if (getcl(fp,b,&argc,argv) == false) {
             break;
         }
 
-        // if emtpy line then continue
+        // if emtpy line then we're done if processing single_cmd, else continue
         if (argc == 0) {
-            continue;
+            if (single_cmd) {
+                break;
+            } else {
+                continue;
+            }
         }
 
         // search cmd_tbl for matching cmd
@@ -562,8 +623,8 @@ void cmd_processor(user_t * u, FILE * fp)
         // process the cmd
         logout = cmd_tbl[i].proc(u, fp, argc-1, argv+1);
 
-        // if logout requested then break
-        if (logout) {
+        // if logout requested or processing a single_cmd then break
+        if (single_cmd || logout) {
             break;
         }
     }
@@ -720,7 +781,7 @@ bool cmd_ls(user_t * u, FILE * fp, int argc, char ** argv)
     // else if argv[0] = "*" then 
     //   display all user names   
     // else
-    //   otherwise display specified user, verbose
+    //   otherwise display specified user
     // endif
 
     if (argc == 0) {
@@ -842,7 +903,7 @@ bool cmd_su(user_t * u, FILE * fp, int argc, char ** argv)
     }
 
     // recursively call cmd_processor, passing in the new user struct
-    cmd_processor(&user[i], fp);
+    cmd_processor(&user[i], fp, false);
 
     // return, no-logout
     return false;
@@ -1063,8 +1124,6 @@ void display_user(FILE * fp, user_t * u)
 {
     int i;
 
-    prcl(fp, "user: %-16s\n", u->user_name);
-
     for (i = 0; i < MAX_USER_WC; i++) {
         if (u->wc[i].wc_macaddr[0] == '\0') {
             continue;
@@ -1078,7 +1137,7 @@ void display_wc(FILE * fp, char * wc_macaddr, user_t * u, int u_wc_idx)
     int i, j;
     bool online;
     struct sockaddr_in online_wc_addr;
-    char wc_owner_and_name[100], s[100];
+    char s[100];
 
     // if user not supplied then attempt to find the user that owns this wc
     if (u == NULL) {
@@ -1112,17 +1171,16 @@ void display_wc(FILE * fp, char * wc_macaddr, user_t * u, int u_wc_idx)
         }
     }
 
-    // display, for example:
-    //   Online   122.123.124.125:32767  11:22:33:44:55:66  steve.north
-    wc_owner_and_name[0] = '\0';
-    if (u != NULL) {
-        sprintf(wc_owner_and_name, "%s.%s", u->user_name, u->wc[u_wc_idx].wc_name);
-    }
-    prcl(fp, "  %-7s  %-21s  %-17s  %s\n",
-         online ? "Online" : "Offline",
-         online ?  sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&online_wc_addr) : "",
+    // display, examples:
+    // wc1          steve        80:1f:02:d3:9f:0c   offline
+    // wc1          steve        80:1f:02:d3:9f:0c   online     14.91.92.44:7575
+    // ---          ---          80:1f:02:d3:9f:0c   online     14.91.92.44:7575
+    prcl(fp, "%-12s %-12s %-17s %-7s %s\n",
+         u ? u->wc[u_wc_idx].wc_name : "---",
+         u ? u->user_name : "---",
          wc_macaddr,
-         wc_owner_and_name);
+         online ? "online" : "offline",
+         online ?  sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&online_wc_addr) : "");
 }
 
 int verify_user_name_and_password(char * user_name, char *password) 
@@ -1296,6 +1354,7 @@ void * wccon2_thread(void *cxarg)
     }
 
     // close sockfd
+    shutdown(cx->sockfd, SHUT_RDWR);
     close(cx->sockfd);
 
     // exit thread
