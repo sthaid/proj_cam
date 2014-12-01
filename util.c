@@ -1,5 +1,82 @@
 #include "wc.h"
 
+// -----------------  CONFIG READ / WRITE  -------------------------------
+
+void setstr(char **dest, char *src);
+
+int config_read(char * config_file_name, config_t * config)
+{
+    FILE * fp;
+    int    i;
+    char * name;
+    char * value;
+    char * saveptr;
+    char   s[100];
+
+    // init all config fields to default
+    for (i = 0; config[i].name; i++) {
+        setstr(&config[i].value, config[i].value_default);
+    }
+
+    // open
+    fp = fopen(config_file_name, "re");  // mode: read-only, close-on-exec
+    if (fp == NULL) {
+        return config_write(config_file_name, config);
+    }
+
+    // read
+    while (fgets(s, sizeof(s), fp) != NULL) {
+        name = strtok_r(s, " \n", &saveptr);
+        if (name == NULL || name[0] == '#') {
+            continue;
+        }
+
+        value = strtok_r(NULL, " \n", &saveptr);
+        if (value == NULL) {
+            value = "";
+        }
+
+        for (i = 0; config[i].name; i++) {
+            if (strcmp(name, config[i].name) == 0) {
+                setstr(&config[i].value, value);
+                break;
+            }
+        }
+    }
+
+    // close
+    fclose(fp);
+    return 0;
+}
+
+int config_write(char * config_file_name, config_t * config)
+{
+    FILE * fp;
+    int    i;
+
+    // open
+    fp = fopen(config_file_name, "we");  // mode: truncate-or-create, close-on-exec
+    if (fp == NULL) {
+        return -1;
+    }
+
+    // write
+    for (i = 0; config[i].name; i++) {
+        fprintf(fp, "%-20s %s\n", config[i].name, config[i].value);
+    }
+
+    // close
+    fclose(fp);
+    return 0;
+}
+
+void setstr(char **dest, char *src)
+{
+    free(*dest);
+    *dest = malloc(strlen(src)+1);
+    strcpy(*dest, src);
+}
+
 // -----------------  CONNECT_TO_CLOUD_SERVER   --------------------------
 
 int connect_to_cloud_server(char * user_name, char * password, char * service)
@@ -348,6 +425,7 @@ void logmsg(char *lvl, const char *func, char *fmt, ...)
             if (new_fp == NULL) {
                 FATAL("failed to create logmsg file %s, %s\n", logmsg_file_name, strerror(errno));
             }
+            setlinebuf(new_fp);
 
             logmsg_fp = new_fp;
             logmsg_file_size = 0;
@@ -570,6 +648,7 @@ bool system_clock_is_set(void)
 
 // -----------------  FILE SYSTEM UTILS  ----------------------------------
 
+#ifndef ANDROID
 uint64_t fs_avail_bytes(char * path)
 {
     int ret;
@@ -587,7 +666,7 @@ uint64_t fs_avail_bytes(char * path)
 
     return free_bytes;
 }
-
+#endif
 
 // -----------------  MISC UTILS  -----------------------------------------
 
