@@ -45,6 +45,17 @@
 #define SOCK_CLOEXEC 0
 #endif
 
+// -----------------  CONFIG READ/WRITE  --------------------------------------------
+
+typedef struct {
+    char * name;
+    char * value_default;
+    char * value;
+} config_t;
+
+int config_read(char * config_file_name, config_t * config);
+int config_write(char * config_file_name, config_t * config);
+
 // -----------------  WC SERVER -----------------------------------------------------
 
 #define CLOUD_SERVER_HOSTNAME        "sthaid-rs.dyndns.org"
@@ -56,6 +67,7 @@
 
 #define CLOUD_SERVER_LOGIN_OK         12345678
 
+#define MAX_USER_WC                   32
 #define MAX_WC_NAME                   32
 #define MAX_WC_MACADDR                32
 #define MAX_USER_NAME                 32
