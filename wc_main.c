@@ -93,7 +93,7 @@ int main(int argc, char **argv)
     // get the wc_macaddr, this is used to identify this webcam in the wc_announce dgram
     tries = 0;
     while (true) {
-        if (getmacaddr(wc_macaddr) < 0) {
+        if (getmacaddr(wc_macaddr) == 0) {
             break;
         }
         if (++tries < 10) {
