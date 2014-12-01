@@ -168,6 +168,7 @@ int p2p1_disconnect(int handle);
 void free_con(int con_tbl_idx);
 int p2p1_send(int handle, void * buff, int len);
 int p2p1_recv(int handle, void * buff, int len, int mode);
+void thread_cleanup_handler(void * cx);
 void * recv_dgram_thread(void * cx);
 void * poll_thread(void * cx);
 int p2p1_get_stats(int handle, p2p_stats_t * stats);
@@ -248,7 +249,7 @@ int p2p1_connect(char * user_name, char * password, char * wc_name, int service)
 
     // try for up to 5 seconds to receive the peer to peer info from cloud_server
     // that is needed to establish the connection to the webcam
-    for (i = 0; i < 50; i++) {
+    for (i = 0; i < 10; i++) {
         // construct connect request dgram
         bzero(&dgram,sizeof(dgram));
         dgram.id = DGRAM_ID_CONNECT_REQ;
@@ -275,8 +276,8 @@ int p2p1_connect(char * user_name, char * password, char * wc_name, int service)
             return -1;
         }
 
-        // recv dgram with 100 msec tout
-        set_sock_opts(sfd, -1, -1, -1, 100000);
+        // recv dgram with 500 msec tout
+        set_sock_opts(sfd, -1, -1, -1, 500000);
         fromlen = sizeof(from);
         ret = recvfrom(sfd, &dgram, sizeof(dgram_t), 0, (struct sockaddr*)&from, &fromlen);
         set_sock_opts(sfd, -1, -1, -1, 0);
@@ -375,21 +376,18 @@ int p2p1_accept(char * wc_macaddr, int * service, char * user_name)
     }
 
     // get address of CLOUD_SERVER_HOSTNAME
-    while (true) {
-        ret = getsockaddr(CLOUD_SERVER_HOSTNAME, CLOUD_SERVER_DGRAM_PORT, SOCK_DGRAM, IPPROTO_UDP, &cloud_server_addr);
-        if (ret < 0) {
-            WARN("failed to get address of %s, retry in 1 minute\n", CLOUD_SERVER_HOSTNAME);
-            sleep(60);
-            continue;
-        }
-
-        time_last_getsockaddr_ms = MILLISEC_TIMER;
-        INFO("address of %s is %s\n", 
-             CLOUD_SERVER_HOSTNAME, 
-             sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&cloud_server_addr));
-        break;
+    ret = getsockaddr(CLOUD_SERVER_HOSTNAME, CLOUD_SERVER_DGRAM_PORT, SOCK_DGRAM, IPPROTO_UDP, &cloud_server_addr);
+    if (ret < 0) {
+        ERROR("failed to get address of %s, retry in 1 minute\n", CLOUD_SERVER_HOSTNAME);
+        close(sfd);
+        return -1;
     }
+    time_last_getsockaddr_ms = MILLISEC_TIMER;
+    INFO("address of %s is %s\n", 
+         CLOUD_SERVER_HOSTNAME, 
+         sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&cloud_server_addr));
 
+    // loop until we get a peer_addr and conn_id from cloud_server
     while (true) {
         // every 10 minutes try to get an updated address for CLOUD_SERVER_HOSTNAME
         if (MILLISEC_TIMER - time_last_getsockaddr_ms > 10*60000) {
@@ -761,23 +759,30 @@ void free_con(int con_tbl_idx)
 {
     con_t                       * con = con_tbl[con_tbl_idx];
     recvbuff_data_valid_entry_t * dve;
+    int                           sfd;
 
     // note - must be called without mutex held, so threads can exit
 
+    // shutdown and close the socket0
+    sfd = con->sfd;
+    con->sfd = -1;
+    shutdown(sfd, SHUT_RDWR);
+    close(sfd);
+    
     // wait for poll_thread and recv_dgram_thread to exit
     if (con->recv_dgram_thread_id) {
-        pthread_cancel(con->recv_dgram_thread_id);
         pthread_join(con->recv_dgram_thread_id, NULL);
+        INFO("XXX JOIN DONE RECV_DGRAM_THREAD\n");
         con->recv_dgram_thread_id = 0;
     }
     if (con->poll_thread_id) {
-        pthread_cancel(con->poll_thread_id);
         pthread_join(con->poll_thread_id, NULL);
+        INFO("XXX JOIN DONE POLL THREAD\n");
         con->poll_thread_id = 0;
     }
     if (con->monitor_thread_id) {
-        pthread_cancel(con->monitor_thread_id);
         pthread_join(con->monitor_thread_id, NULL);
+        INFO("XXX JOIN DONE MONITOR THREAD\n");
         con->monitor_thread_id = 0;
     }
 
@@ -785,9 +790,6 @@ void free_con(int con_tbl_idx)
     TAILQ_FOREACH(dve, &con->recvbuff_data_valid_list_head, entries) {
         free(dve);
     }
-
-    // close socket
-    close(con->sfd);
 
     // log state change to STATE_DISCONNECTED
     CON_STATE_CHANGE(con, STATE_DISCONNECTED);
@@ -1103,7 +1105,7 @@ int p2p1_recv(int handle, void * buff, int len, int mode)
 
 // -----------------  RECV_DGRAM_THREAD  -------------------------------
 
-void cleanup_handler(void * cx)
+void thread_cleanup_handler(void * cx)
 {
     pthread_mutex_t ** mutex_locked = cx;
 
@@ -1127,15 +1129,18 @@ void * recv_dgram_thread(void * cx)
     uint64_t           time_ms;
     pthread_mutex_t  * mutex_locked = NULL;
 
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-
-    pthread_cleanup_push(cleanup_handler, &mutex_locked);
+    pthread_cleanup_push(thread_cleanup_handler, &mutex_locked);
 
     while (true) {
         // receive a datagram
         fromlen = sizeof(from);
         length = recvfrom(con->sfd, dgram, sizeof(dgram_storage), 0,
                           (struct sockaddr *)&from, &fromlen);
+
+        // if free_con has shutdown the sfd then exit this thread
+        if (con->sfd == -1) {
+            break;
+        }
 
         // acquire mutex  (not a cancel point)
         pthread_mutex_lock(&mutex[con_tbl_idx]);
@@ -1470,13 +1475,16 @@ void * poll_thread(void * cx)
     uint64_t             time_ms;
     pthread_mutex_t    * mutex_locked = NULL;
 
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
-
-    pthread_cleanup_push(cleanup_handler, &mutex_locked);
+    pthread_cleanup_push(thread_cleanup_handler, &mutex_locked);
 
     while (true) {
         // sleep for TIME_DELTA_MS
         sleep_ms(TIME_DELTA_MS, NULL);
+
+        // if free_con has shutdown the sfd then exit this thread
+        if (con->sfd == -1) {
+            break;
+        }
 
         // acquire mutex
         pthread_mutex_lock(&mutex[con_tbl_idx]);
@@ -1620,18 +1628,15 @@ void * monitor_thread(void * cx)
     con_t     * con = con_tbl[con_tbl_idx];
     p2p_stats_t stats, stats_last;
     uint64_t    stats_time_ms, stats_last_time_ms;
-    int         interval_ms;
+    int         interval_ms, i;
     int         print_header_count=0;
     bool        first_loop = true;
-
-    // enable thread cancel
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 
     // init to avoid compiler warning
     stats_last = con->stats;
     stats_last_time_ms = MILLISEC_TIMER;
 
-    // loop until thread is cancelled
+    // loop until thread is must terminate
     while (true) {
         // if sleep time is 0 then 
         //   wait until non zero
@@ -1640,7 +1645,10 @@ void * monitor_thread(void * cx)
         // endif
         if (con->monitor_secs == 0 || first_loop) {
             while (con->monitor_secs == 0) {
-                sleep_ms(1000,NULL);
+                sleep_ms(100,NULL);
+                if (con->sfd == -1) {
+                    goto done;
+                }
             }
             print_header_count = 0;
             stats_last = con->stats;
@@ -1658,7 +1666,12 @@ void * monitor_thread(void * cx)
         }
 
         // sleep for caller's desired interval
-        sleep_ms(con->monitor_secs*1000, NULL);
+        for (i = 0; i < con->monitor_secs; i++) {
+            sleep_ms(1000, NULL);
+            if (con->sfd == -1) {
+                goto done;
+            }
+        }
 
         // get stats now
         stats = con->stats;
@@ -1683,7 +1696,8 @@ void * monitor_thread(void * cx)
         stats_last_time_ms = stats_time_ms;
     }
 
-    // not reached, this thread exits by being cancelled
+done:
+    // terminate
     return NULL;
 }
 

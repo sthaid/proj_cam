@@ -6,7 +6,7 @@
 // defines
 //
 
-#define MAX_HANDLE 32
+#define MAX_HANDLE 200  // android uses a lot of fds
 
 #define MILLISEC_TIMER  (microsec_timer() / 1000)
 
@@ -25,6 +25,7 @@ typedef struct {
     pthread_mutex_t send_mutex;
     stats_t         stats;
     pthread_t       mon_thread_id;
+    bool            mon_thread_cancel_req;
     int             mon_secs;
 } con_t;
 
@@ -117,8 +118,9 @@ static int p2p2_disconnect(int handle)
 
     // cancel monitor thread
     if (con->mon_thread_id != 0) {
-        pthread_cancel(con->mon_thread_id);
+        con->mon_thread_cancel_req = true;
         pthread_join(con->mon_thread_id, NULL);
+        INFO("XXX JOINED WITH MONIOR THREAD\n");
         con->mon_thread_id = 0;
     }
 
@@ -184,6 +186,13 @@ static int p2p2_recv(int handle, void * buff, int len, int mode)
         ERROR("invalid, handle=%d connected=%d failed=%d\n", 
               handle, con ? con->connected : -1, con ? con->failed : -1);
         return RECV_ERROR;
+    }
+
+    // XXX RECV_NOWAIT_ALL is not working because the FIONREAD ioctl does
+    // not indicate when the other side has closed its socket; for now 
+    // replace with RECV_WAIT_ALL
+    if (mode == RECV_NOWAIT_ALL) {
+        mode = RECV_WAIT_ALL;
     }
 
     // if mode is non blocking recv of all data then check that
@@ -285,12 +294,9 @@ static void * monitor_thread(void * cx)
 
     stats_t  stats, stats_last;
     uint64_t stats_time_ms, stats_last_time_ms;
-    int      interval_ms;
+    int      interval_ms, i;
     int      print_header_count=0;
     bool     first_loop = true;
-
-    // enable thread cancel
-    pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 
     // init to avoid compiler warning
     stats_last = con->stats;
@@ -305,7 +311,10 @@ static void * monitor_thread(void * cx)
         // endif
         if (con->mon_secs == 0 || first_loop) {
             while (con->mon_secs == 0) {
-                sleep_ms(1000);
+                sleep_ms(100);
+                if (con->mon_thread_cancel_req) {
+                    goto done;
+                }
             }
             print_header_count = 0;
             stats_last = con->stats;
@@ -321,7 +330,12 @@ static void * monitor_thread(void * cx)
         }
 
         // sleep for caller's desired interval
-        sleep_ms(con->mon_secs*1000);
+        for (i = 0; i < con->mon_secs; i++) {
+            sleep_ms(1000);
+            if (con->mon_thread_cancel_req) {
+                goto done;
+            }
+        }
 
         // get stats now
         stats = con->stats;
@@ -338,7 +352,8 @@ static void * monitor_thread(void * cx)
         stats_last_time_ms = stats_time_ms;
     }
 
-    // not reached, this thread exits by being cancelled
+done:
+    // terminate
     return NULL;
 }
 
