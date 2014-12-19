@@ -29,6 +29,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #include <stddef.h>
 #include <errno.h>
 #include <unistd.h>
+#include <pthread.h>
 #include <sys/socket.h>
 #include <netpacket/packet.h>
 #include <net/if_arp.h>
@@ -128,7 +129,7 @@ static struct nlmsghdr *getNetlinkResponse(int p_socket, int *p_size, int *p_don
     for(;;)
     {
         free(l_buffer);
-        l_buffer = malloc(l_size);
+        l_buffer = calloc(1,l_size);
         if (l_buffer == NULL)
         {
             return NULL;
@@ -173,7 +174,7 @@ static struct nlmsghdr *getNetlinkResponse(int p_socket, int *p_size, int *p_don
 
 static NetlinkList *newListItem(struct nlmsghdr *p_data, unsigned int p_size)
 {
-    NetlinkList *l_item = malloc(sizeof(NetlinkList));
+    NetlinkList *l_item = calloc(1,sizeof(NetlinkList));
     if (l_item == NULL)
     {
         return NULL;
@@ -325,7 +326,7 @@ static int interpretLink(struct nlmsghdr *p_hdr, struct ifaddrs **p_resultList)
         }
     }
     
-    struct ifaddrs *l_entry = malloc(sizeof(struct ifaddrs) + sizeof(int) + l_nameSize + l_addrSize + l_dataSize);
+    struct ifaddrs *l_entry = calloc(1,sizeof(struct ifaddrs) + sizeof(int) + l_nameSize + l_addrSize + l_dataSize);
     if (l_entry == NULL)
     {
         return -1;
@@ -448,7 +449,7 @@ static int interpretAddr(struct nlmsghdr *p_hdr, struct ifaddrs **p_resultList, 
         }
     }
     
-    struct ifaddrs *l_entry = malloc(sizeof(struct ifaddrs) + l_nameSize + l_addrSize);
+    struct ifaddrs *l_entry = calloc(1,sizeof(struct ifaddrs) + l_nameSize + l_addrSize);
     if (l_entry == NULL)
     {
         return -1;
@@ -611,8 +612,13 @@ static int interpretAddrs(int p_socket, NetlinkList *p_netlinkList, struct ifadd
 
 int getifaddrs(struct ifaddrs **ifap)
 {
+    static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+    pthread_mutex_lock(&mutex);
+
     if(!ifap)
     {
+        pthread_mutex_unlock(&mutex);
         return -1;
     }
     *ifap = NULL;
@@ -620,6 +626,7 @@ int getifaddrs(struct ifaddrs **ifap)
     int l_socket = netlink_socket();
     if(l_socket < 0)
     {
+        pthread_mutex_unlock(&mutex);
         return -1;
     }
     
@@ -627,6 +634,7 @@ int getifaddrs(struct ifaddrs **ifap)
     if(!l_linkResults)
     {
         close(l_socket);
+        pthread_mutex_unlock(&mutex);
         return -1;
     }
     
@@ -635,6 +643,7 @@ int getifaddrs(struct ifaddrs **ifap)
     {
         close(l_socket);
         freeResultList(l_linkResults);
+        pthread_mutex_unlock(&mutex);
         return -1;
     }
     
@@ -648,6 +657,9 @@ int getifaddrs(struct ifaddrs **ifap)
     freeResultList(l_linkResults);
     freeResultList(l_addrResults);
     close(l_socket);
+
+    pthread_mutex_unlock(&mutex);
+
     return l_result;
 }
 
