@@ -2,29 +2,30 @@
 
 // -----------------  CONFIG READ / WRITE  -------------------------------
 
-void setstr(char **dest, char *src);
-
-int config_read(char * config_file_name, config_t * config)
+int config_read(char * config_path, config_t * config, int config_version)
 {
     FILE * fp;
-    int    i;
+    int    i, version=0;
     char * name;
     char * value;
     char * saveptr;
-    char   s[100];
+    char   s[100] = "";
 
-    // init all config fields to default
-    for (i = 0; config[i].name; i++) {
-        setstr(&config[i].value, config[i].value_default);
+    // open config_file and verify version, 
+    // if this fails then write the config file with default values
+    if ((fp = fopen(config_path, "re")) == NULL ||
+        fgets(s, sizeof(s), fp) == NULL ||
+        sscanf(s, "VERSION %d", &version) != 1 ||
+        version != config_version)
+    {
+        if (fp != NULL) {
+            fclose(fp);
+        }
+        INFO("creating default config file %s, version=%d\n", config_path, config_version);
+        return config_write(config_path, config, config_version);
     }
 
-    // open
-    fp = fopen(config_file_name, "re");  // mode: read-only, close-on-exec
-    if (fp == NULL) {
-        return config_write(config_file_name, config);
-    }
-
-    // read
+    // read config entries
     while (fgets(s, sizeof(s), fp) != NULL) {
         name = strtok_r(s, " \n", &saveptr);
         if (name == NULL || name[0] == '#') {
@@ -36,9 +37,9 @@ int config_read(char * config_file_name, config_t * config)
             value = "";
         }
 
-        for (i = 0; config[i].name; i++) {
+        for (i = 0; config[i].name[0]; i++) {
             if (strcmp(name, config[i].name) == 0) {
-                setstr(&config[i].value, value);
+                strcpy(config[i].value, value);
                 break;
             }
         }
@@ -49,19 +50,23 @@ int config_read(char * config_file_name, config_t * config)
     return 0;
 }
 
-int config_write(char * config_file_name, config_t * config)
+int config_write(char * config_path, config_t * config, int config_version)
 {
     FILE * fp;
     int    i;
 
     // open
-    fp = fopen(config_file_name, "we");  // mode: truncate-or-create, close-on-exec
+    fp = fopen(config_path, "we");  // mode: truncate-or-create, close-on-exec
     if (fp == NULL) {
+        ERROR("failed to write config file %s, %s\n", config_path, strerror(errno));
         return -1;
     }
 
-    // write
-    for (i = 0; config[i].name; i++) {
+    // write version
+    fprintf(fp, "VERSION %d\n", config_version);
+
+    // write name/value pairs
+    for (i = 0; config[i].name[0]; i++) {
         fprintf(fp, "%-20s %s\n", config[i].name, config[i].value);
     }
 
@@ -70,16 +75,9 @@ int config_write(char * config_file_name, config_t * config)
     return 0;
 }
 
-void setstr(char **dest, char *src)
-{
-    free(*dest);
-    *dest = malloc(strlen(src)+1);
-    strcpy(*dest, src);
-}
-
 // -----------------  CONNECT_TO_CLOUD_SERVER   --------------------------
 
-int connect_to_cloud_server(char * user_name, char * password, char * service)
+int connect_to_cloud_server(char * user_name, char * password, char * service, bool * access_denied)
 {
     struct sockaddr_in addr;
     char               login[3*32];
@@ -87,6 +85,9 @@ int connect_to_cloud_server(char * user_name, char * password, char * service)
     int                ret, sfd, len, login_response;
     char               s[100];
     char               http_connect_resp[sizeof(HTTP_CONNECT_RESP)];
+
+    // preset return access_denied
+    *access_denied = false;
 
     // get address of CLOUD_SERVER
     ret =  getsockaddr(CLOUD_SERVER_HOSTNAME, CLOUD_SERVER_PORT, SOCK_STREAM, 0, &addr); 
@@ -146,19 +147,22 @@ int connect_to_cloud_server(char * user_name, char * password, char * service)
         return -1;
     }
 
-    // read ack
+    // read login response
     len = recv(sfd, &login_response, sizeof(login_response), MSG_WAITALL);
     if (len != sizeof(login_response)) {
         ERROR("reading login response from cloud server, %s\n", strerror(errno));
         close(sfd);
         return -1;
     }
+
+    // verify login response
     if (login_response != CLOUD_SERVER_LOGIN_OK) {
         bzero(login_err_str,sizeof(login_err_str));
         memcpy(login_err_str, &login_response, 4);
         read(sfd,login_err_str+4,sizeof(login_err_str)-5);
         ERROR("login failed: %s\n", login_err_str);
         close(sfd);
+        *access_denied = true;
         return -1;
     }
 
@@ -344,8 +348,6 @@ done:
 }
         
 // -----------------  LOGGING & PRINTMSG  ---------------------------------
-
-// XXX update viewer to log to a file
 
 #ifndef ANDROID
 
@@ -605,14 +607,18 @@ char * time2str(char * str, time_t time, bool gmt)
 
     if (gmt) {
         gmtime_r(&time, &tm);
+        snprintf(str, MAX_TIME_STR,
+                "%2.2d/%2.2d/%2.2d %2.2d:%2.2d:%2.2d GMT",
+                tm.tm_mon+1, tm.tm_mday, tm.tm_year%100,
+                tm.tm_hour, tm.tm_min, tm.tm_sec);
     } else {
         localtime_r(&time, &tm);
+        snprintf(str, MAX_TIME_STR,
+                "%2.2d/%2.2d/%2.2d %2.2d:%2.2d:%2.2d",
+                tm.tm_mon+1, tm.tm_mday, tm.tm_year%100,
+                tm.tm_hour, tm.tm_min, tm.tm_sec);
     }
 
-    snprintf(str, MAX_TIME_STR,
-            "%2.2d/%2.2d/%2.2d %2.2d:%2.2d:%2.2d",
-            tm.tm_mon+1, tm.tm_mday, tm.tm_year%100,
-            tm.tm_hour, tm.tm_min, tm.tm_sec);
 
     return str;
 }

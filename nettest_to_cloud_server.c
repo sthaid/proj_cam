@@ -76,11 +76,14 @@ void nettest_to_server(char * user_name, char * password)
     int   sfd, len, i;
     long  start1, end1, start2, end2;
     char  buff[CLOUD_SERVER_MAX_NETTEST_BUFF];
+    bool  access_denied;
 
     // connect to cloud_server
-    sfd = connect_to_cloud_server(user_name, password, "nettest");
+    sfd = connect_to_cloud_server(user_name, password, "nettest", &access_denied);
     if (sfd == -1) {
-        FATAL("unable to connect to server\n");
+        FATAL("unable to connect to server - %s\n",
+              access_denied ? "access denied" : "host unreachable");
+
     }
 
     // log starting notice

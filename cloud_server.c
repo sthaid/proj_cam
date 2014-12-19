@@ -12,12 +12,6 @@
 #define MAX_ONL_WC        1000
 #define MAX_USER_WC       32
 
-// string lengths
-#define MAX_USER_NAME     32
-#define MIN_USER_NAME     4
-#define MAX_PASSWORD      32
-#define MIN_PASSWORD      2
-
 // for calls to getcl
 #define MAX_GETCL_BUFF    1000
 #define MAX_GETCL_ARGV    100

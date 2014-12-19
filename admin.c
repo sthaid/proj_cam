@@ -26,6 +26,7 @@ int main(int argc, char **argv)
     int             sfd;
     struct rlimit   rl;
     char            opt_char;
+    bool            access_denied;
     bool            create_account = false;
 
     // set stdout to unbuffered
@@ -76,9 +77,11 @@ int main(int argc, char **argv)
     // connect to CAMSERVER
     sfd = connect_to_cloud_server(user_name, 
                                   password, 
-                                  create_account ? "create" : "login");
+                                  create_account ? "create" : "login",
+                                  &access_denied);
     if (sfd == -1) {
-        FATAL("unable to connect to server\n");
+        FATAL("unable to connect to server - %s\n",
+              access_denied ? "access denied" : "host unreachable");
     }
 
     // create thread to copy output from server to stdout

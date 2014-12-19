@@ -47,14 +47,15 @@
 
 // -----------------  CONFIG READ/WRITE  --------------------------------------------
 
+#define MAX_CONFIG_VALUE_STR 100
+
 typedef struct {
-    char * name;
-    char * value_default;
-    char * value;
+    const char * name;
+    char         value[MAX_CONFIG_VALUE_STR];
 } config_t;
 
-int config_read(char * config_file_name, config_t * config);
-int config_write(char * config_file_name, config_t * config);
+int config_read(char * config_path, config_t * config, int config_version);
+int config_write(char * config_path, config_t * config, int config_version);
 
 // -----------------  WC SERVER -----------------------------------------------------
 
@@ -72,11 +73,14 @@ int config_write(char * config_file_name, config_t * config);
 #define MAX_WC_MACADDR                32
 #define MAX_USER_NAME                 32
 #define MAX_PASSWORD                  32
+#define MIN_USER_NAME                 4
+#define MIN_PASSWORD                  4
+
 
 #define HTTP_CONNECT_REQ  "CONNECT " CLOUD_SERVER_HOSTNAME ":80 HTTP/1.0\r\n\r\n"
 #define HTTP_CONNECT_RESP "HTTP/1.0 200 OK\r\n\r\n"
 
-int connect_to_cloud_server(char * user_name, char * password, char * service);
+int connect_to_cloud_server(char * user_name, char * password, char * service, bool * access_denied);
 
 // -----------------  PEER TO PEER COMMUNICATION  ------------------------------------
 
@@ -336,9 +340,9 @@ typedef struct {
 #define PB_SUBMODE_PAUSE 1
 #define PB_SUBMODE_PLAY  2
 #define PB_SUBMODE_STR(psm) \
-    ((psm) == PB_SUBMODE_STOP  ? "STOP" : \
-     (psm) == PB_SUBMODE_PAUSE ? "PAUSE": \
-     (psm) == PB_SUBMODE_PLAY  ? "PLAY" : \
+    ((psm) == PB_SUBMODE_STOP  ? "STOPPED" : \
+     (psm) == PB_SUBMODE_PAUSE ? "PAUSED"  : \
+     (psm) == PB_SUBMODE_PLAY  ? "PLAYING" : \
                                  "????")
 
 // pb_dir values
@@ -348,10 +352,6 @@ typedef struct {
     ((dir) == PB_DIR_FWD  ? "FWD"  : \
      (dir) == PB_DIR_REV  ? "REV"  : \
                             "????")
-
-// pb_speed min/max
-#define PB_SPEED_MIN  0.1
-#define PB_SPEED_MAX  9999
 
 // macro to get the real time when in PB_SUBMODE_PLAY
 #define PB_SUBMODE_PLAY_REAL_TIME_US(m) \

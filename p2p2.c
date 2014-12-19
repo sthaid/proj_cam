@@ -71,10 +71,11 @@ static int p2p2_connect(char * user_name, char * password, char * wc_name, int s
     int       handle;
     con_t   * con;
     pthread_t thread_id;
+    bool      access_denied;  // XXX return this to caller 
 
     // connect to cloud_server, with 'wccon' service
     sprintf(service, "wccon %s %d", wc_name, service_id);
-    handle = connect_to_cloud_server(user_name, password, service);
+    handle = connect_to_cloud_server(user_name, password, service, &access_denied);
 
     // verify handle is in range
     if (handle < 0 || handle >= MAX_HANDLE) {

@@ -242,7 +242,7 @@ int p2p1_connect(char * user_name, char * password, char * wc_name, int service)
     }
     ret = bind(sfd, (struct sockaddr*)&local_addr, sizeof(local_addr));
     if (ret == -1) {
-        ERROR("bind\n");
+        ERROR("bind %s\n", strerror(errno));
         close(sfd);
         return -1;
     }
@@ -772,22 +772,21 @@ void free_con(int con_tbl_idx)
     // wait for poll_thread and recv_dgram_thread to exit
     if (con->recv_dgram_thread_id) {
         pthread_join(con->recv_dgram_thread_id, NULL);
-        INFO("XXX JOIN DONE RECV_DGRAM_THREAD\n");
         con->recv_dgram_thread_id = 0;
     }
     if (con->poll_thread_id) {
         pthread_join(con->poll_thread_id, NULL);
-        INFO("XXX JOIN DONE POLL THREAD\n");
         con->poll_thread_id = 0;
     }
     if (con->monitor_thread_id) {
         pthread_join(con->monitor_thread_id, NULL);
-        INFO("XXX JOIN DONE MONITOR THREAD\n");
         con->monitor_thread_id = 0;
     }
 
     // free the recvbuff_data_valid_list
-    TAILQ_FOREACH(dve, &con->recvbuff_data_valid_list_head, entries) {
+    while (!TAILQ_EMPTY(&con->recvbuff_data_valid_list_head)) {
+        dve = TAILQ_FIRST(&con->recvbuff_data_valid_list_head);
+        TAILQ_REMOVE(&con->recvbuff_data_valid_list_head, dve, entries);
         free(dve);
     }
 
