@@ -11,17 +11,14 @@
 // TBD LATER - tune the values in compare_compare_jpeg used to determine pixel is different, or brightness change
 
 // XXX problem:
-// - lost the device when changing resolution
-// - pulling usb cable creatd /dev/video1
-// - had to restart program and pull usb cable again to recover
-
+// - pulling usb cable creatd /dev/video1, MAYBE FIXED
 
 //
 // defines
 //
 
 // tuning
-#define SLEEP_US                  50000
+#define SLEEP_US                  50000  // XXX just code the delays, and is this one too long
 #define CAM_INIT_RETRY_SLEEP_US   10000000
 #define MAX_FRAME                 32  
 #define MAX_FRAME_BEHIND          15
@@ -86,6 +83,7 @@
 // misc
 #define ROUND_UP(v,n) (((uint64_t)(v) + ((n) - 1)) & ~((uint64_t)(n) - 1))
 #define MB 0x100000
+#define MS 1000
 
 //
 // typedefs
@@ -302,7 +300,7 @@ void * wc_svc_webcam(void * cx)
         // sleep 
         //
 
-        usleep(SLEEP_US);
+        usleep(10*MS);  //XXX
 
         //
         // perform non-blocking recv to get client command
@@ -400,7 +398,7 @@ void * wc_svc_webcam(void * cx)
             }
 
             // process all available posted frames
-            while (frame_post_head < frame_post_tail) {
+            if (frame_post_head < frame_post_tail) do {
                 frame_t  f;
 
                 // if we are too far behind then skip frames
@@ -416,7 +414,7 @@ void * wc_svc_webcam(void * cx)
                 // if frame does not contain image then skip
                 if (f.state == FRAME_STATE_NO_IMAGE) {
                     frame_post_head++;
-                    continue;
+                    break;
                 }
 
                 // if frame count is less than the last then skip
@@ -424,7 +422,7 @@ void * wc_svc_webcam(void * cx)
                     WARN("frame_count has gone backward, curr=%"PRId64" last=%"PRId64"\n", 
                          f.count, frame_count_last);
                     frame_post_head++;
-                    continue;
+                    break;
                 }
                 frame_count_last = f.count;
 
@@ -441,11 +439,12 @@ void * wc_svc_webcam(void * cx)
                         pthread_rwlock_unlock(&cam_init_webcam_rwlock);
                         goto done;
                     }
+                    // usleep(300000);  //XXX test
                 }
 
                 // increment head
                 frame_post_head++;
-            }
+            } while (0);
 
             // release cam_init_webcam_rwlock
             pthread_rwlock_unlock(&cam_init_webcam_rwlock);
@@ -669,7 +668,7 @@ void cam_init_webcam(int resolution)
 try_again:
     // if not first try then delay
     if (!first_try) {
-        DEBUG("sleep and retry\n");
+        INFO("sleep and retry\n"); //XXX was debug
         cam_status = STATUS_ERR_WEBCAM_FAILURE;
         usleep(CAM_INIT_RETRY_SLEEP_US);
     }
@@ -682,7 +681,7 @@ try_again:
             if (bufmap[i].addr != NULL) {
                 munmap(bufmap[i].addr, bufmap[i].length);
                 bufmap[i].addr = NULL;
-                bufmap[i].length = 0; 
+                bufmap[i].length = 0;
             }
         }
         cam_fd = -1;
@@ -1035,6 +1034,7 @@ int cam_compare_jpeg(uint8_t * jpeg, uint32_t jpeg_size, uint64_t time_us, bool 
         // - at least two boxex have 5% pixels different
         // - at least three boxex have 3% pixels different
         motion_detected = (box10cnt >= 1 || box5cnt >= 2 || box3cnt >= 3);
+        motion_detected = true; //XXX test
 
         // determine pixel average brightness difference
         brightness_diff = pixel_avg - gs_save_pixel_avg;
@@ -1578,7 +1578,7 @@ void * rp_write_file_frame_thread(void * cx)
                 if (ret < 0) {
                     ERROR("failed to write frame\n");
                     pthread_rwlock_unlock(&cam_init_webcam_rwlock);
-                    goto error;
+                    goto error; // XXX ?
                 }
                 last_frame_is_gap = false;
                 last_frame_written_real_time_us = this_frame_real_time_us;
