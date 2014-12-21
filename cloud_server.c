@@ -221,6 +221,7 @@ void * service_accept_thread(void * cx)
         // read and validate http connect request
         // XXX this needs a timeout
         // XXX and maybe this should be a thread already
+        // XXX delay when password validation fails
         bzero(http_connect_req, sizeof(http_connect_req));
         set_sock_opts(sockfd, -1, -1, -1, 1000000);
         len = recv(sockfd, http_connect_req, sizeof(http_connect_req)-1, MSG_WAITALL);
