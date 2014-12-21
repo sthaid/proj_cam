@@ -43,6 +43,12 @@ PROCEDURE
 - build and install wc_server 
   - bin/install_raspberry_pi
 
+- apply usb patch
+  - add the folloing to /boot/cmdline.txt, and reboot
+      dwc_otg.fiq_fsm_enable=0
+  - see https://github.com/raspberrypi/linux/issues/618 for information
+  - this seems to fix a webcam failure that occurs when closing and reopening the /dev/video0
+
 - disconnect wireless keyboard and mouse and connect camera, and reboot
 
 
