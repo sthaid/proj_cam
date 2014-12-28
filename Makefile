@@ -23,13 +23,13 @@ cloud_server: $(CLOUD_SERVER_OBJS)
 	$(CC) -pthread -lrt -o $@ $(CLOUD_SERVER_OBJS)
 
 wc_server: $(WC_SERVER_OBJS) 
-	$(CC) -pthread -lrt -ljpeg -o $@ $(WC_SERVER_OBJS)
+	$(CC) -pthread -lrt -ljpeg -lreadline -o $@ $(WC_SERVER_OBJS)
 
 admin: $(ADMIN_OBJS) 
 	$(CC) -pthread -lrt -lreadline -o $@ $(ADMIN_OBJS)
 
 viewer: $(VIEWER_OBJS) 
-	$(CC) -pthread -lrt -ljpeg -lSDL2 -lSDL2_ttf -lSDL2_mixer -o $@ $(VIEWER_OBJS)
+	$(CC) -pthread -lrt -ljpeg -lSDL2 -lSDL2_ttf -lSDL2_mixer -lreadline -o $@ $(VIEWER_OBJS)
 
 loginwc: $(LOGIN_OBJS) 
 	$(CC) -pthread -lrt -o $@ $(LOGIN_OBJS)

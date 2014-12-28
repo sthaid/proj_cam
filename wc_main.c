@@ -7,7 +7,6 @@
 //
 
 #define MAX_SERVICE_TBL (sizeof(service_tbl)/sizeof(service_tbl[0]))
-#define MAX_GETCL_ARGV  10
 #define MAX_HOSTNAME    100
 
 //
@@ -41,7 +40,6 @@ void * wc_svc_shell(void * cx);
 void * wc_svc_webcam(void * cx);
 
 void * debug_thread(void * cx);
-bool getcl(int * argc, char ** argv);
 
 //
 // service table 
@@ -166,8 +164,14 @@ int main(int argc, char **argv)
 
 // -----------------  DEBUG  --------------------------------------------------------
 
+#include <readline/readline.h>
+#include <readline/history.h>
+
 void * debug_thread(void * cx)
 {
+    #define MAX_GETCL_ARGV 10
+
+    char * line = NULL;
     int    argc;
     char * argv[MAX_GETCL_ARGV];
 
@@ -176,15 +180,30 @@ void * debug_thread(void * cx)
 
     while (true) {
         // print prompt and read cmd/args
-        PRINTF("DEBUG> ");
-        if (getcl(&argc,argv) == false) {
+        free(line);
+        if ((line = readline("DEBUG> ")) == NULL) {
             break;
+        }
+        if (line[0] != '\0') {
+            add_history(line);
+        }
+
+        // parse line to argc/argv
+        argc = 0;
+        while (true) {
+            char * token = strtok(argc==0?line:NULL, " \n");
+            if (token == NULL || argc == MAX_GETCL_ARGV) {
+                break;
+            }
+            argv[argc++] = token;
         }
 
         // if blank line then continue
         if (argc == 0) {
             continue;
         }
+
+        // process commands ...
 
         // cmd: help
         if (strcmp(argv[0], "help") == 0) {
@@ -221,34 +240,12 @@ void * debug_thread(void * cx)
             p2p_monitor_ctl(handle, secs);
             continue;
         }
+
+        // invalid command
+        PRINTF("invalid command\n");
     }
 
     INFO("program terminating\n");
     exit(0);
-}
-
-bool getcl(int * argc, char ** argv)
-{
-    char * saveptr;
-    char * token;
-    static char b[100];
-
-    *argc = 0;
-
-    if (fgets(b, sizeof(b), stdin) == NULL) {
-        return false;
-    }
-
-    while (true) {
-        token = strtok_r(*argc==0?b:NULL, "   \n", &saveptr);
-        if (token == NULL) {
-            return true;
-        }
-        argv[*argc] = token;
-        *argc = *argc + 1;
-        if (*argc == MAX_GETCL_ARGV) {
-            return true;
-        }
-    }
 }
 

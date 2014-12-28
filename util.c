@@ -506,11 +506,15 @@ void logmsg(char *lvl, const char *func, char *fmt, ...)
 
 void printmsg(char *fmt, ...) 
 {
+#if 1
+    // this is intended for command line user interface, which is not available on android
+#else
     va_list ap;
 
     va_start(ap, fmt);
     SDL_LogMessageV(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO, fmt, ap);
     va_end(ap);
+#endif
 }
 
 #endif

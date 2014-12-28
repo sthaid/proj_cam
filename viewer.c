@@ -340,7 +340,6 @@ void render_text_ex(SDL_Rect * pane, int row, int col, char * str, int mouse_eve
 void * webcam_thread(void * cx);
 #ifndef ANDROID
 void * debug_thread(void * cx);
-bool getcl(int * argc, char ** argv);
 #endif
 
 // -----------------  MAIN  ----------------------------------------------
@@ -1356,7 +1355,6 @@ void display_handler(void)
 
     // -----------------------------------------------
     // ---- live & playback modes: ctlpane bottom ----
-    // ---- (except in config mode)               ----
     // -----------------------------------------------
 
     // Ctl Pane Bottom ...
@@ -1370,9 +1368,7 @@ void display_handler(void)
     // CONFIG  QUIT    
 
     // status display
-    if (((mode.mode == MODE_LIVE) ||
-         (mode.mode == MODE_PLAYBACK && win_height > 200)))   //ZZZ 200
-    {
+    if ((mode.mode == MODE_LIVE) || (mode.mode == MODE_PLAYBACK)) {
         switch (status_select) {
 
         case 0: {  // FRAMES/SEC
@@ -1958,10 +1954,15 @@ void * webcam_thread(void * cx)
 // -----------------  DEBUG THREAD  -------------------------------------------------
 
 #ifndef ANDROID
+
+#include <readline/readline.h>
+#include <readline/history.h>
+
 void * debug_thread(void * cx)
 {
     #define MAX_GETCL_ARGV 10
 
+    char * line = NULL;
     int    argc;
     char * argv[MAX_GETCL_ARGV];
     p2p_routines_t * p2p = &p2p1;
@@ -1972,15 +1973,30 @@ void * debug_thread(void * cx)
     // loop until eof on debug input or thread cancelled
     while (true) {
         // print prompt and read cmd/args
-        PRINTF("DEBUG> ");
-        if (getcl(&argc,argv) == false) {
+        free(line);
+        if ((line = readline("DEBUG> ")) == NULL) {
             break;
+        }
+        if (line[0] != '\0') {
+            add_history(line);
+        }
+
+        // parse line to argc/argv
+        argc = 0;
+        while (true) {
+            char * token = strtok(argc==0?line:NULL, " \n");
+            if (token == NULL || argc == MAX_GETCL_ARGV) {
+                break;
+            }
+            argv[argc++] = token;
         }
 
         // if blank line then continue
         if (argc == 0) {
             continue;
         }
+
+        // process commands ...
 
         // cmd: help
         if (strcmp(argv[0], "help") == 0) {
@@ -1989,7 +2005,6 @@ void * debug_thread(void * cx)
             continue;
         }
 
-#if 1 // ZZZ
         // cmd: p2p_debug_con 
         if (strcmp(argv[0], "p2p_debug_con") == 0) {
             int handle;
@@ -2018,7 +2033,9 @@ void * debug_thread(void * cx)
             p2p_monitor_ctl(handle, secs);
             continue;
         }
-#endif
+
+        // invalid command
+        PRINTF("invalid command\n");
     }
 
     // eof on debug input
@@ -2026,28 +2043,4 @@ void * debug_thread(void * cx)
     return NULL;
 }
 
-bool getcl(int * argc, char ** argv)
-{
-    char * saveptr;
-    char * token;
-    static char b[100];
-
-    *argc = 0;
-
-    if (fgets(b, sizeof(b), stdin) == NULL) {
-        return false;
-    }
-
-    while (true) {
-        token = strtok_r(*argc==0?b:NULL, " \n", &saveptr);
-        if (token == NULL) {
-            return true;
-        }
-        argv[*argc] = token;
-        *argc = *argc + 1;
-        if (*argc == MAX_GETCL_ARGV) {
-            return true;
-        }
-    }
-}
 #endif
