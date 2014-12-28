@@ -231,7 +231,7 @@ bool getcl(int * argc, char ** argv)
 {
     char * saveptr;
     char * token;
-    char   b[100];
+    static char b[100];
 
     *argc = 0;
 

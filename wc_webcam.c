@@ -6,33 +6,23 @@
 #include <sys/mman.h>
 #include <linux/videodev2.h>
 
-// TBD - need to set cam_status and rp_status, and use these in viewer.c
-
-// TBD LATER - tune the values in compare_compare_jpeg used to determine pixel is different, or brightness change
-
-// XXX problem:
-// - pulling usb cable creatd /dev/video1, MAYBE FIXED
+// XXX try /dev/video1, 2....
+// XXX in overnight run it stopped receiving frames, perhaps ...
+//     - in live mode if no frames received by viewer, it can display that
+//     - in playback mode, should there always be frames received
+//     - can wc_webcam.c detect this and reinit;  could use non blocking on the dqbuf
 
 //
 // defines
 //
 
 // tuning
-#define SLEEP_US                  50000  // XXX just code the delays, and is this one too long
-#define CAM_INIT_RETRY_SLEEP_US   10000000
-#define MAX_FRAME                 32  
-#define MAX_FRAME_BEHIND          15
+#define MAX_BUFMAP                32  
 #define FRAMES_PER_SEC            10
 #define FRAME_COMPARE_INTERVAL    5
 
 // webcam 
-#define WC_VIDEO "/dev/video0"
-
-// cam frame state
-#define FRAME_STATE_NO_IMAGE       0
-#define FRAME_STATE_IMAGE_PRESENT  1
-#define FRAME_STATE_IMAGE_SAME     2
-#define FRAME_STATE_IMAGE_NEW      3
+#define WC_VIDEO "/dev/video"
 
 // cam resolution
 #define MAX_RESOLUTION    3
@@ -94,18 +84,20 @@ typedef struct {
     int     length;
 } bufmap_t;
 
-typedef struct {
-    int                state;
-    uint64_t           count;
-    bool               motion;
-    uint64_t           time_us;
-    struct v4l2_buffer buffer;
+typedef struct frame_s {
+    uint32_t             ref_count;
+    bool                 motion;
+    uint64_t             time_us;
+    TAILQ_ENTRY(frame_s) entries;
+    int32_t              buff_len;
+    uint8_t              buff[0];
 } frame_t;
 
 typedef struct {
     int resolution;
 } cam_settings_t;
 
+// ZZZ could use the config mechanism here
 typedef struct {
     char    * name;
     int32_t * value;
@@ -149,15 +141,15 @@ typedef struct {
 //
 
 // cam
-int               cam_fd = -1;
-bufmap_t          bufmap[MAX_FRAME];
-frame_t           frame[MAX_FRAME];
-volatile uint64_t frame_post_tail;
-pthread_rwlock_t  cam_init_webcam_rwlock;
+int                      cam_fd = -1;
+bufmap_t                 bufmap[MAX_BUFMAP];
+TAILQ_HEAD(th1, frame_s) proc_frame_list;
+pthread_mutex_t          proc_frame_list_mutex;
+pthread_rwlock_t         cam_init_webcam_rwlock;
 
 // status
-uint32_t          cam_status;
-uint32_t          rp_status;
+uint32_t cam_status;
+uint32_t rp_status;
 
 // record / playback
 uint64_t          rp_file_size;
@@ -194,7 +186,8 @@ void * wc_svc_webcam(void * cx);
 int cam_init(void);
 void cam_init_webcam(int resolution);
 void * cam_thread(void * cx);
-int cam_compare_jpeg(uint8_t * jpeg, uint32_t jpeg_size, uint64_t time_us, bool * new_image, bool * motion);
+void compare_gs_image(uint8_t * gs1, uint32_t gs1_w, uint32_t gs1_h, uint8_t * gs2, uint32_t gs2_w, uint32_t gs2_h,
+                      bool * motion, bool * brightness);
 int cam_settings_read(void);
 int cam_settings_write(void);
 void cam_setting_change_resolution(void);
@@ -219,7 +212,9 @@ int wc_svc_webcam_init(void)
 {
     int ret;
 
-    // init rwlock
+    // init
+    TAILQ_INIT(&proc_frame_list);
+    pthread_mutex_init(&proc_frame_list_mutex, NULL);
     pthread_rwlock_init(&cam_init_webcam_rwlock, NULL);
 
     // initialize record/playback
@@ -242,8 +237,6 @@ int wc_svc_webcam_init(void)
 
 void * wc_svc_webcam(void * cx)
 {
-    #define FPH (frame_post_head % MAX_FRAME)
-
     #define SEND_MSG_FRAME(_data, _data_len, _motion, _real_time_us, _status) \
         ( { \
             int ret = 0; \
@@ -270,28 +263,26 @@ void * wc_svc_webcam(void * cx)
          : rp_file_hdr.last_frame_valid_through_real_time_us - rp_toc[rp_toc_idx_oldest].real_time_us)
 
     // common variables
-    int           handle                       = (long)cx;
-    int           ret                          = 0;
-    struct mode_s mode                         = {0,0,0,0,0};
-    bool          mode_is_new                  = false;
-    uint64_t      last_status_msg_send_time_us = 0;
-    uint64_t      min_send_intvl_us            = 0;
+    int           handle                        = (long)cx;
+    int           ret                           = 0;
+    struct mode_s mode                          = {0,0,0,0,0};
+    bool          mode_is_new                   = false;
+    uint64_t      last_status_msg_send_time_us  = 0;
+    uint64_t      min_send_intvl_us             = 0;
     webcam_msg_t  msg;
 
     // live mode variables
-    uint64_t frame_post_head              = 0;
-    uint64_t frame_count_last             = 0;
-    bool     frame_first                  = true;
-    uint64_t live_last_frame_send_time_us = 0;
+    frame_t     * live_frame                    = NULL;
+    uint64_t      live_last_frame_send_time_us  = 0;
 
     // playback mode variables
-    bool     stop_frame_sent               = false;
-    bool     pause_frame_sent              = false;
-    uint64_t pause_frame_read_fail_time_us = 0;
-    uint64_t play_frame_start_real_time_us = 0;
-    uint64_t play_frame_end_real_time_us   = 0;
-    uint64_t play_last_frame_send_time_us  = 0;
-    uint64_t play_frame_read_fail_time_us  = 0;
+    bool          stop_frame_sent               = false;
+    bool          pause_frame_sent              = false;
+    uint64_t      pause_frame_read_fail_time_us = 0;
+    uint64_t      play_frame_start_real_time_us = 0;
+    uint64_t      play_frame_end_real_time_us   = 0;
+    uint64_t      play_last_frame_send_time_us  = 0;
+    uint64_t      play_frame_read_fail_time_us  = 0;
 
     INFO("starting\n");
 
@@ -300,7 +291,7 @@ void * wc_svc_webcam(void * cx)
         // sleep 
         //
 
-        usleep(10*MS);  //XXX
+        usleep(10*MS);
 
         //
         // perform non-blocking recv to get client command
@@ -322,14 +313,16 @@ void * wc_svc_webcam(void * cx)
                 DEBUG("received MSG_TYPE_CMD_LIVE_MODE_CHANGE_RES\n");
                 cam_setting_change_resolution();
                 break;
+
             case MSG_TYPE_CMD_SET_MODE:
-#ifdef DEBUG_PRINTS
+// #ifdef DEBUG_PRINTS
+#if 1 //XXX
                 if (msg.u.mt_cmd_set_mode.mode == MODE_LIVE) {
-                    DEBUG("received MSG_TYPE_CMD_SET_MODE - mode=%s\n", 
+                    INFO("received MSG_TYPE_CMD_SET_MODE - mode=%s\n", 
                           MODE_STR(msg.u.mt_cmd_set_mode.mode));
                 } else {
                     char ts1[MAX_TIME_STR], ts2[MAX_TIME_STR];
-                    DEBUG("received MSG_TYPE_CMD_SET_MODE - mode=%s %s %s speed=%f mode_entry=%s play=%s\n",
+                    INFO("received MSG_TYPE_CMD_SET_MODE - mode=%s %s %s speed=%f mode_entry=%s play=%s\n",
                           MODE_STR(msg.u.mt_cmd_set_mode.mode),
                           PB_SUBMODE_STR(msg.u.mt_cmd_set_mode.pb_submode),
                           PB_DIR_STR(msg.u.mt_cmd_set_mode.pb_dir),
@@ -341,6 +334,7 @@ void * wc_svc_webcam(void * cx)
                 mode = msg.u.mt_cmd_set_mode;
                 mode_is_new = true;
                 break;
+
             case MSG_TYPE_CMD_SET_MIN_SEND_INTVL_US:
                 DEBUG("received MSG_TYPE_CMD_SET_MIN_SEND_INTVL_US - intvl=%"PRId64"\n", 
                        msg.u.mt_cmd_min_send_intvl.us);
@@ -349,6 +343,7 @@ void * wc_svc_webcam(void * cx)
                     min_send_intvl_us = 1000000;
                 }
                 break;
+
             default:
                 ERROR("invalid msg_type %d\n", msg.msg_type);
                 goto done;
@@ -364,12 +359,13 @@ void * wc_svc_webcam(void * cx)
 
             p2p_get_stats(handle, &p2p_stats);
             msg.msg_type = MSG_TYPE_STATUS;
+            msg.u.mt_status.version         = VERSION;
             msg.u.mt_status.cam_status      = cam_status;
             msg.u.mt_status.rp_status       = rp_status;
             msg.u.mt_status.rp_duration_us  = RP_DURATION;
             msg.u.mt_status.p2p_resend_cnt  = p2p_stats.resent_data_dgrams;
             msg.u.mt_status.p2p_recvdup_cnt = p2p_stats.peer_recvd_duplicates;
-            if ((ret = p2p_send(handle, &msg, sizeof(webcam_msg_t))) < 0) {
+            if (p2p_send(handle, &msg, sizeof(webcam_msg_t)) < 0) {
                 ERROR("p2p_send status failed\n");
                 goto done;
             }
@@ -385,66 +381,44 @@ void * wc_svc_webcam(void * cx)
 
             // if just entered this mode then init
             if (mode_is_new) {
-                frame_post_head = frame_post_tail;
-                frame_count_last = 0;
-                frame_first = true;
-                live_last_frame_send_time_us = 0;
-                mode_is_new = false;
+                live_frame                    = NULL;
+                live_last_frame_send_time_us  = 0;
+                mode_is_new                   = false;
             }
+
+            // if too soon to send then continue
+            curr_us = microsec_timer();
+            if (curr_us - live_last_frame_send_time_us < min_send_intvl_us) {
+                continue;
+            }
+            live_last_frame_send_time_us = curr_us;
 
             // try to acquire the cam_init_webcam_rwlock, if failed then continue
             if (pthread_rwlock_tryrdlock(&cam_init_webcam_rwlock) != 0) {
                 continue;
             }
 
-            // process all available posted frames
-            if (frame_post_head < frame_post_tail) do {
-                frame_t  f;
+            // attempt to get new live_frame from proc_frame_list, if none then continue;
+            pthread_mutex_lock(&proc_frame_list_mutex);
+            if (TAILQ_EMPTY(&proc_frame_list) || live_frame == TAILQ_LAST(&proc_frame_list,th1)) {
+                pthread_mutex_unlock(&proc_frame_list_mutex);
+                pthread_rwlock_unlock(&cam_init_webcam_rwlock);
+                continue;
+            } else if (live_frame == NULL) {
+                live_frame = TAILQ_LAST(&proc_frame_list,th1);
+                live_frame->ref_count++;
+            } else {
+                live_frame->ref_count--;
+                live_frame = TAILQ_NEXT(live_frame,entries);
+                live_frame->ref_count++;
+            }
+            pthread_mutex_unlock(&proc_frame_list_mutex);
 
-                // if we are too far behind then skip frames
-                if (frame_post_tail - frame_post_head > MAX_FRAME_BEHIND) {
-                    WARN("too far behind, skipping %d frames\n", 
-                         (int)(frame_post_tail-frame_post_head-MAX_FRAME_BEHIND));
-                    frame_post_head = frame_post_tail - MAX_FRAME_BEHIND;
-                }
-
-                // make copy of frame header to be processed
-                f = frame[FPH];
-
-                // if frame does not contain image then skip
-                if (f.state == FRAME_STATE_NO_IMAGE) {
-                    frame_post_head++;
-                    break;
-                }
-
-                // if frame count is less than the last then skip
-                if (f.count <= frame_count_last) {
-                    WARN("frame_count has gone backward, curr=%"PRId64" last=%"PRId64"\n", 
-                         f.count, frame_count_last);
-                    frame_post_head++;
-                    break;
-                }
-                frame_count_last = f.count;
-
-                // if this is the first frame for this connection or there is new data
-                // then send the frame
-                curr_us = microsec_timer();
-                if ((frame_first) || 
-                    (f.state == FRAME_STATE_IMAGE_NEW && 
-                     curr_us - live_last_frame_send_time_us >= min_send_intvl_us))
-                {
-                    frame_first = false;
-                    live_last_frame_send_time_us = curr_us;
-                    if (SEND_MSG_FRAME(bufmap[f.buffer.index].addr, f.buffer.bytesused, f.motion, 0, STATUS_INFO_OK) < 0) {
-                        pthread_rwlock_unlock(&cam_init_webcam_rwlock);
-                        goto done;
-                    }
-                    // usleep(300000);  //XXX test
-                }
-
-                // increment head
-                frame_post_head++;
-            } while (0);
+            // send the frame
+            if (SEND_MSG_FRAME(live_frame->buff, live_frame->buff_len, live_frame->motion, 0, STATUS_INFO_OK) < 0) {
+                pthread_rwlock_unlock(&cam_init_webcam_rwlock);
+                goto done;
+            }
 
             // release cam_init_webcam_rwlock
             pthread_rwlock_unlock(&cam_init_webcam_rwlock);
@@ -665,19 +639,21 @@ void cam_init_webcam(int resolution)
     int                        i;
     bool                       first_try = true;
 
+    INFO("starting, resolution=%d\n", resolution);
+
 try_again:
     // if not first try then delay
     if (!first_try) {
-        INFO("sleep and retry\n"); //XXX was debug
+        INFO("sleep and retry\n");
         cam_status = STATUS_ERR_WEBCAM_FAILURE;
-        usleep(CAM_INIT_RETRY_SLEEP_US);
+        usleep(10000*MS);  // 10 secs
     }
     first_try = false;
 
     // if already initialized, then perform uninitialize
     if (cam_fd > 0) {
         close(cam_fd);
-        for (i = 0; i < MAX_FRAME; i++) {
+        for (i = 0; i < MAX_BUFMAP; i++) {
             if (bufmap[i].addr != NULL) {
                 munmap(bufmap[i].addr, bufmap[i].length);
                 bufmap[i].addr = NULL;
@@ -689,9 +665,18 @@ try_again:
     }
 
     // open webcam
-    cam_fd = open(WC_VIDEO, O_RDWR|O_CLOEXEC);
+    for (i = 0; i < 2; i++) {
+        char devpath[100];
+        sprintf(devpath, "%s%d", WC_VIDEO, i);
+        cam_fd = open(devpath, O_RDWR|O_CLOEXEC|O_NONBLOCK);
+        if (cam_fd < 0) {
+            ERROR("open failed %s %s\n",  devpath, strerror(errno));
+        } else {
+            INFO("open success %s\n", devpath);
+            break;
+        }
+    }
     if (cam_fd < 0) {
-        ERROR("open %s %s\n",  WC_VIDEO, strerror(errno));
         goto try_again;
     }
 
@@ -763,21 +748,21 @@ try_again:
     bzero(&reqbuf, sizeof(reqbuf));
     reqbuf.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
     reqbuf.memory = V4L2_MEMORY_MMAP;
-    reqbuf.count = MAX_FRAME;
+    reqbuf.count = MAX_BUFMAP;
     if (ioctl (cam_fd, VIDIOC_REQBUFS, &reqbuf) < 0) {
         ERROR("ioctl VIDIOC_REQBUFS %s\n", strerror(errno));
         goto try_again;
     }
 
     // verify we got all the frames requested
-    if (reqbuf.count != MAX_FRAME) {
+    if (reqbuf.count != MAX_BUFMAP) {
         ERROR("got wrong number of frames, requested %d, actual %d\n",
-              MAX_FRAME, reqbuf.count);
+              MAX_BUFMAP, reqbuf.count);
         goto try_again;
     }
 
     // memory map each of the buffers
-    for (i = 0; i < MAX_FRAME; i++) {
+    for (i = 0; i < MAX_BUFMAP; i++) {
         bzero(&buffer,sizeof(struct v4l2_buffer));
         buffer.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         buffer.memory = V4L2_MEMORY_MMAP;
@@ -799,7 +784,7 @@ try_again:
     }
 
     // give the buffers to driver
-   for (i = 0; i < MAX_FRAME; i++) {
+   for (i = 0; i < MAX_BUFMAP; i++) {
         bzero(&buffer,sizeof(struct v4l2_buffer));
         buffer.type   = V4L2_BUF_TYPE_VIDEO_CAPTURE;
         buffer.memory = V4L2_MEMORY_MMAP;
@@ -824,302 +809,417 @@ try_again:
 
 void * cam_thread(void * cx)
 {
+    int                curr_resolution = 0;
+    bool               cam_init_needed = true;
+
     struct v4l2_buffer buffer;
-    bool               new_image, motion;
-    uint64_t           frame_time_us;
-    int                i;
+    uint64_t           last_frame_check_ok_time_us;
+    uint64_t           recvd_frame_count;
+    uint64_t           last_proc_frame_count;
+    uint64_t           last_motion_frame_count;
+    frame_t          * new_frame;
+    frame_t          * new_frame_array[FRAME_COMPARE_INTERVAL];
+    uint32_t           nfa_idx;
+    frame_t          * proc_frame_array[FRAME_COMPARE_INTERVAL];
+    uint32_t           pfa_idx;
+    uint8_t          * recvd_gs;
+    uint32_t           recvd_gs_w;
+    uint32_t           recvd_gs_h;
+    uint8_t          * curr_gs;
+    uint32_t           curr_gs_w;
+    uint32_t           curr_gs_h;
 
-    int                curr_resolution        = 0;
-    uint32_t           frame_count            = 0;
-    uint64_t           frame_read_tail        = 0;
-    bool               first_time             = true;
+    #define INIT_LOCAL_VARS() \
+        do { \
+            bzero(&buffer, sizeof(buffer)); \
+            last_frame_check_ok_time_us = 0; \
+            recvd_frame_count           = 0; \
+            last_proc_frame_count       = 0; \
+            last_motion_frame_count     = 0; \
+            new_frame                   = NULL; \
+            bzero(new_frame_array, sizeof(new_frame_array)); \
+            nfa_idx                     = 0; \
+            bzero(proc_frame_array, sizeof(proc_frame_array)); \
+            pfa_idx                     = FRAME_COMPARE_INTERVAL; \
+            recvd_gs                    = NULL; \
+            recvd_gs_w                  = 0; \
+            recvd_gs_h                  = 0; \
+            curr_gs                     = NULL; \
+            curr_gs_w                   = 0; \
+            curr_gs_h                   = 0; \
+        } while (0)
 
-    static uint64_t    last_frame_time_us;
+    #define FREE_LOCAL_VARS() \
+        do { \
+            int i; \
+            if (new_frame) { \
+                free(new_frame); \
+                new_frame = NULL; \
+            } \
+            for (i = 0; i < FRAME_COMPARE_INTERVAL; i++) { \
+                if (new_frame_array[i]) { \
+                    free(new_frame_array[i]); \
+                    new_frame_array[i] = NULL; \
+                } \
+            } \
+            for (i = 0; i < FRAME_COMPARE_INTERVAL; i++) { \
+                if (proc_frame_array[i]) { \
+                    free(proc_frame_array[i]); \
+                    proc_frame_array[i] = NULL; \
+                } \
+            } \
+            if (recvd_gs) { \
+                free(recvd_gs); \
+                recvd_gs = NULL; \
+            } \
+            if (curr_gs) { \
+                free(curr_gs); \
+                curr_gs = NULL; \
+            } \
+        } while (0)
 
-    #define FRT(x) ((frame_read_tail + (x)) % MAX_FRAME) 
+    #define IOCTL_VIDIOC_QBUF() \
+        do { \
+            buffer.flags = 0; \
+            if (ioctl(cam_fd, VIDIOC_QBUF, &buffer) < 0) { \
+                ERROR("ioctl VIDIOC_QBUF %s\n", strerror(errno));  \
+                cam_status = STATUS_ERR_WEBCAM_FAILURE; \
+                goto cam_failure; \
+            } \
+        } while (0)
 
     // detach because this thread will not be joined
     pthread_detach(pthread_self());
 
+    // initialize local vars
+    INIT_LOCAL_VARS();
+
+    // loop forever
     while (true) {
         // process settings changes
-        if (first_time || cam_settings.resolution != curr_resolution) {
+        if (cam_init_needed || cam_settings.resolution != curr_resolution) {
             int res = cam_settings.resolution;
+
+            FREE_LOCAL_VARS();
+            INIT_LOCAL_VARS();
 
             pthread_rwlock_wrlock(&cam_init_webcam_rwlock);
             cam_init_webcam(res);
-            for (i = 0; i < MAX_FRAME; i++) {
-                frame[i].state = FRAME_STATE_NO_IMAGE;
-            }
-            curr_resolution = res;
             pthread_rwlock_unlock(&cam_init_webcam_rwlock);
+
+            curr_resolution = res;
+            cam_init_needed = false;
         }
-        first_time = false;
 
         // read a frame
-        bzero(&buffer, sizeof(buffer));
-        buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
-        buffer.memory = V4L2_MEMORY_MMAP;
-        if (ioctl(cam_fd, VIDIOC_DQBUF, &buffer) < 0) {
-            ERROR("ioctl VIDIOC_DQBUF %s\n", strerror(errno));
-            cam_status = STATUS_ERR_WEBCAM_FAILURE;
-            first_time = true;
-            continue;
-        }
-
-        // give the buffer back to driver
-        if (ioctl(cam_fd, VIDIOC_QBUF, &buffer) < 0) {
-            ERROR("ioctl VIDIOC_QBUF %s\n", strerror(errno)); 
-            cam_status = STATUS_ERR_WEBCAM_FAILURE;
-            first_time = true;
-            continue;
-        }
-
-        // drop frame if it's time is not in order
-        frame_time_us = TIMEVAL_TO_US(&buffer.timestamp);
-        if (frame_time_us <= last_frame_time_us) {
-            ERROR("dropping frame - time out of order, curr=%d.%6.6d last=%d.%6.6d\n",
-                  (int)(frame_time_us / 1000000),
-                  (int)((frame_time_us % 1000000)),
-                  (int)(last_frame_time_us / 1000000),
-                  (int)((last_frame_time_us % 1000000)));
-            continue;
-        }
-        last_frame_time_us = frame_time_us;
-
-        // init the frame
-        frame[FRT(0)].state   = FRAME_STATE_IMAGE_PRESENT;
-        frame[FRT(0)].count   = ++frame_count;
-        frame[FRT(0)].motion  = false;
-        frame[FRT(0)].time_us = frame_time_us;
-        frame[FRT(0)].buffer  = buffer;
-                   
-        // first time through this loop, prime cam_compare_jpeg
-        if (frame_read_tail == 0) {
-            if (cam_compare_jpeg(bufmap[buffer.index].addr, buffer.bytesused, frame_time_us, &new_image, &motion) < 0) {
-                continue;
-            }
-            frame[FRT(0)].state  = FRAME_STATE_IMAGE_NEW;
-            frame[FRT(0)].motion = true;
-            frame_read_tail++;
-            continue;
-        }
-
-        // every FRAME_COMPARE_INTERVAL frame ...
-        if ((frame_read_tail % FRAME_COMPARE_INTERVAL) == 0) {
-            if (cam_compare_jpeg(bufmap[buffer.index].addr, buffer.bytesused, frame_time_us, &new_image, &motion) < 0) {
-                continue;
-            }
-
-            for (i = 0; i < FRAME_COMPARE_INTERVAL; i++) {
-                if (frame[FRT(-i)].state != FRAME_STATE_IMAGE_PRESENT) {
+        int count = 0;
+        while (true) {
+            bzero(&buffer, sizeof(buffer));
+            buffer.type = V4L2_BUF_TYPE_VIDEO_CAPTURE;
+            buffer.memory = V4L2_MEMORY_MMAP;
+            if (ioctl(cam_fd, VIDIOC_DQBUF, &buffer) < 0) {
+                if (errno == EAGAIN && count++ < 50) {
+                    usleep(50*MS);
                     continue;
                 }
+                ERROR("ioctl VIDIOC_DQBUF failed, count=%d, %s\n", count, strerror(errno));
+                cam_status = STATUS_ERR_WEBCAM_FAILURE;
+                goto cam_failure;
+            }
+            break;
+        }
 
-                frame[FRT(-i)].state = (motion              ? FRAME_STATE_IMAGE_NEW :
-                                        new_image && i == 0 ? FRAME_STATE_IMAGE_NEW 
-                                                            : FRAME_STATE_IMAGE_SAME);
-                frame[FRT(-i)].motion = motion;
+        // if error flag is set then requeue the buffer and continue
+        if (buffer.flags & V4L2_BUF_FLAG_ERROR) {
+            WARN("V4L2_BUF_FLAG_ERROR is set, flags=0x%x\n", buffer.flags);
+            IOCTL_VIDIOC_QBUF();
+            continue;
+        }
+
+        // ZZZ temp print flags
+        if (buffer.flags != 0x2005) {
+            INFO("BUFFER FLAGS 0x%x  rfc=%"PRId64"\n", buffer.flags, recvd_frame_count);
+        }
+
+        // frame check - it is error if:
+        // - time has gone backward
+        // - time jumps forward more than 10 seconds
+        uint64_t frame_time_us = TIMEVAL_TO_US(&buffer.timestamp);
+        if ((last_frame_check_ok_time_us > 0) &&
+            ((frame_time_us <= last_frame_check_ok_time_us) ||
+             (frame_time_us > last_frame_check_ok_time_us + 10000000)))
+        {
+            ERROR("frame sanity check failed - time out of order, rfc=%"PRId64" curr=%d.%6.6d last=%d.%6.6d\n",
+                  recvd_frame_count,
+                  (int)(frame_time_us / 1000000),
+                  (int)((frame_time_us % 1000000)),
+                  (int)(last_frame_check_ok_time_us / 1000000),
+                  (int)((last_frame_check_ok_time_us % 1000000)));
+            cam_status = STATUS_ERR_FRAME_TIME;
+            goto cam_failure;
+        }
+        last_frame_check_ok_time_us = frame_time_us;
+
+        // allocate and init a new_frame, 
+        // add it to the new_frame_array, and
+        // increment the count of number frames recvd
+        new_frame = malloc(sizeof(frame_t) + buffer.bytesused);
+        if (new_frame == NULL) {
+            ERROR("malloc frame failed, bytesused=%d\n", buffer.bytesused);
+            cam_status = STATUS_ERR_FRAME_DATA_MEM_ALLOC;
+            goto cam_failure;
+        }
+        new_frame->ref_count = 0;
+        new_frame->motion    = false;
+        new_frame->time_us   = frame_time_us;
+        new_frame->buff_len  = buffer.bytesused;
+        memcpy(new_frame->buff, bufmap[buffer.index].addr, buffer.bytesused);
+        new_frame_array[nfa_idx++] = new_frame;
+        new_frame = NULL;
+        recvd_frame_count++;
+
+        // requeue the buffer to the driver
+        IOCTL_VIDIOC_QBUF();
+
+        // if new_frame_array is full
+        if (nfa_idx == FRAME_COMPARE_INTERVAL) {
+            bool motion, brightness;
+            int  ret, i;
+
+            // assert that the proc_frame_array is empty
+            assert(pfa_idx == FRAME_COMPARE_INTERVAL);
+
+            // reset nfa_idx
+            nfa_idx = 0;
+
+            // convert the recvd jpeg to recvd_gs
+            ret = jpeg_decode(
+                    0, JPEG_DECODE_MODE_GS, 
+                    new_frame_array[FRAME_COMPARE_INTERVAL-1]->buff, new_frame_array[FRAME_COMPARE_INTERVAL-1]->buff_len,
+                    &recvd_gs, &recvd_gs_w, &recvd_gs_h);
+            if (ret != 0 || !VALID_WIDTH_AND_HEIGHT(recvd_gs_w,recvd_gs_h)) {
+                ERROR("jpeg_decode ret=%d width=%d height=%d\n", ret, recvd_gs_w, recvd_gs_h);
+            }
+
+            // compare recvd_gs with curr_gs
+            compare_gs_image(recvd_gs, recvd_gs_w, recvd_gs_h,
+                             curr_gs, curr_gs_w, curr_gs_h,
+                             &motion, &brightness);
+
+            // if motion detected within the past 1 seconds then 
+            // add all FRAME_COMPARE_INTERVAL entries in new_frame_array to the proc_frame_array
+            if (motion) {
+                last_motion_frame_count = recvd_frame_count;
+            }
+            if (recvd_frame_count - last_motion_frame_count <= 10) {
+                for (i = 0; i < FRAME_COMPARE_INTERVAL; i++) {
+                    new_frame_array[i]->motion = motion;
+                    proc_frame_array[i] = new_frame_array[i];
+                    new_frame_array[i] = NULL;
+                }
+                pfa_idx = 0;
+
+                free(curr_gs);
+                curr_gs = recvd_gs;
+                curr_gs_w = recvd_gs_w;
+                curr_gs_h = recvd_gs_h;
+
+                recvd_gs = NULL;
+                recvd_gs_w = 0;
+                recvd_gs_h = 0;
+
+                last_proc_frame_count = recvd_frame_count;
+
+            // else if brightness has changed or haven't sent a frame in past 50 recvd 
+            //      then add just 1 entry from the new_frame_array to the proc_frame_array, and free others
+            } else if (brightness || (recvd_frame_count > last_proc_frame_count + 50)) {
+                proc_frame_array[FRAME_COMPARE_INTERVAL-1] = new_frame_array[FRAME_COMPARE_INTERVAL-1];
+                new_frame_array[FRAME_COMPARE_INTERVAL-1] = NULL;
+                for (i = 0; i < FRAME_COMPARE_INTERVAL-1; i++) {
+                    free(new_frame_array[i]);
+                    new_frame_array[i] = NULL;
+                }
+                pfa_idx = FRAME_COMPARE_INTERVAL-1;
+
+                free(curr_gs);
+                curr_gs = recvd_gs;
+                curr_gs_w = recvd_gs_w;
+                curr_gs_h = recvd_gs_h;
+
+                recvd_gs = NULL;
+                recvd_gs_w = 0;
+                recvd_gs_h = 0;
+
+                last_proc_frame_count = recvd_frame_count;
+
+            // else free all new_frame_array entries
+            } else {
+                for (i = 0; i < FRAME_COMPARE_INTERVAL; i++) {
+                    free(new_frame_array[i]);
+                    new_frame_array[i] = NULL;
+                }
+
+                free(recvd_gs);
+                recvd_gs = NULL;
+                recvd_gs_w = 0;
+                recvd_gs_h = 0;
             }
         }
-            
-        // bump frame_read_tail
-        frame_read_tail++;
 
-        // set frame_post_tail, this is what other threads use to check for frame(s) available
-        if (frame_read_tail >= FRAME_COMPARE_INTERVAL) {
-            frame_post_tail = frame_read_tail - (FRAME_COMPARE_INTERVAL-1);
+        // acquire process_frames_list_mutex
+        pthread_mutex_lock(&proc_frame_list_mutex);
+
+        // if there are frames in the proc_frame_array then add the oldest to the proc_frame_list
+        if (pfa_idx < FRAME_COMPARE_INTERVAL) {
+            TAILQ_INSERT_TAIL(&proc_frame_list, proc_frame_array[pfa_idx], entries);
+            proc_frame_array[pfa_idx] = NULL;
+            pfa_idx++;
         }
+
+        // remove entries in the process_frames_list that have timestamps older than 2 secs
+        // and which are not currently being used
+        uint64_t curr_us = microsec_timer();
+        frame_t * frame = TAILQ_FIRST(&proc_frame_list);
+        frame_t * next;
+        while (frame != NULL) {
+            if (curr_us - frame->time_us < 2000000) {
+                break;
+            }
+            next = TAILQ_NEXT(frame, entries);
+            if (frame->ref_count == 0) {
+                TAILQ_REMOVE(&proc_frame_list, frame, entries);
+                free(frame);
+            }
+            frame = next;
+        }
+
+        // release process_frames_list_mutex
+        pthread_mutex_unlock(&proc_frame_list_mutex);
+
+        // continue
+        continue;
+
+        // jump here when a webcam error occurs
+cam_failure:
+        cam_init_needed = true;
     }
 
     // thread exit
     return NULL;
 }
 
-int cam_compare_jpeg(uint8_t * jpeg, uint32_t jpeg_size, uint64_t time_us, bool * new_image, bool * motion)
+void compare_gs_image(uint8_t * gs1, uint32_t gs1_w, uint32_t gs1_h, uint8_t * gs2, uint32_t gs2_w, uint32_t gs2_h,
+                      bool * motion, bool * brightness)
 {
-    uint8_t        * gs_curr;
-    int              ret;
-    uint32_t         width, height;
-    double           pixel_avg;
-    bool             motion_detected = false;
-    bool             brightness_change_detected = false;
+    #define MAX_BOX_X  8
+    #define MAX_BOX_Y  6
 
-    static uint8_t * gs_save;
-    static uint32_t  gs_save_width, gs_save_height;
-    static double    gs_save_pixel_avg;
-    static uint64_t  last_motion_detected_time_us;
-    static uint64_t  last_new_image_time_us;
+    uint32_t width, height;
+    uint32_t box[MAX_BOX_Y][MAX_BOX_X];
+    uint32_t x, y, box_x, box_y, box_w, box_h, gs1_pixel_sum, gs2_pixel_sum, idx;
+    uint32_t box10cnt, box5cnt, box3cnt;
+    double   brightness_diff, gs1_pixel_avg, gs2_pixel_avg;
 
     // preset returns
-    *new_image = false;
     *motion = false;
+    *brightness = false;
 
-    // convert jpeg to grayscale
-    ret = jpeg_decode(0, JPEG_DECODE_MODE_GS, jpeg, jpeg_size, &gs_curr, &width, &height);
-    if (ret != 0 || !VALID_WIDTH_AND_HEIGHT(width,height)) {
-        ERROR("jpeg_decode ret=%d width=%d height=%d\n", ret, width, height);
-        free(gs_curr);
-        return -1;
+    // if either gs1 or gs2 don't exist or the dimensions are different then 
+    // return motion change flag
+    if (gs1 == NULL || gs2 == NULL || gs1_w != gs2_w || gs1_h != gs2_h) {
+        *motion = true;
+        return;
     }
 
-    // if width or height has changed then get rid fo gs_save
-    if (width != gs_save_width || height != gs_save_height) {
-        free(gs_save);
-        gs_save = NULL;
-        gs_save_pixel_avg = 0;
-        gs_save_width = 0;
-        gs_save_height = 0;
+    // init local vars
+    bzero(box, sizeof(box));
+    width         = gs1_w;
+    height        = gs1_h;
+    box_w         = width / MAX_BOX_X;
+    box_h         = height / MAX_BOX_Y;
+    gs1_pixel_sum = 0;
+    gs2_pixel_sum = 0;
+    box10cnt      = 0;
+    box5cnt       = 0;
+    box3cnt       = 0;
+
+    // compare gs1 with gs2, detect change due to motion or brightness ...
+
+    // loop serves two purposes
+    // a) sum the intensity of all pixels, and compute pixel_avg
+    // b) compute the number of pixels different in each box in the
+    //    MAX_BOX_X x MAX_BOX_Y grid which overlays the image
+    idx = 0;
+    for (y = 0; y < height; y++) {
+        box_y = y / box_h;
+        for (x = 0; x < width; x++) {
+            gs1_pixel_sum += gs1[idx];
+            gs2_pixel_sum += gs2[idx];
+            if (abs(gs2[idx] - gs1[idx]) > 30) {
+                box[box_y][x/box_w]++;
+            }
+            idx++;
+        }
+    }
+    gs1_pixel_avg = (double)gs1_pixel_sum / (width*height);
+    gs2_pixel_avg = (double)gs2_pixel_sum / (width*height);
+
+    // convert box to percent pixel diff
+    for (box_y = 0; box_y < MAX_BOX_Y; box_y++) {
+        for (box_x = 0; box_x < MAX_BOX_X; box_x++) {
+            box[box_y][box_x] = box[box_y][box_x] * 100 / (box_w * box_h);
+        }
     }
 
-    // compare current gs against saved gs image
-    if (gs_save != NULL) {
-        #define MAX_BOX_X  8
-        #define MAX_BOX_Y  6
-        uint32_t box[MAX_BOX_Y][MAX_BOX_X];
-        uint32_t x, y, box_x, box_y, box_w, box_h, pixel_sum, idx;
-        uint32_t box10cnt, box5cnt, box3cnt;
-        double   brightness_diff;
-
-        // init
-        bzero(box, sizeof(box));
-        box_w     = width / MAX_BOX_X;
-        box_h     = height / MAX_BOX_Y;
-        pixel_sum = 0;
-        idx       = 0;
-        box10cnt  = 0;
-        box5cnt   = 0;
-        box3cnt   = 0;
-
-        // loop serves two purposes
-        // a) sum the intensity of all pixels, and compute pixel_avg
-        // b) compute the number of pixels different in each box in the
-        //    MAX_BOX_X x MAX_BOX_Y grid which overlays the image
-        for (y = 0; y < height; y++) {
-            box_y = y / box_h;
-            for (x = 0; x < width; x++) {
-                pixel_sum += gs_curr[idx];
-                if (abs(gs_curr[idx] - gs_save[idx]) > 30) {
-                    box[box_y][x/box_w]++;
-                }
-                idx++;
-            }
+    // count number of boxes with greater than 10%, 5%, and 3% pixels different
+    for (box_y = 0; box_y < MAX_BOX_Y; box_y++) {
+        for (box_x = 0; box_x < MAX_BOX_X; box_x++) {
+            if (box[box_y][box_x] >= 10) {
+                box10cnt++;
+            } 
+            if (box[box_y][box_x] >= 5) {
+                box5cnt++;
+            } 
+            if (box[box_y][box_x] >= 3) {
+                box3cnt++;
+            } 
         }
-        pixel_avg = (double)pixel_sum / (width*height);
+    }
 
-        // convert box to percent pixel diff
-        for (box_y = 0; box_y < MAX_BOX_Y; box_y++) {
-            for (box_x = 0; box_x < MAX_BOX_X; box_x++) {
-                box[box_y][box_x] = box[box_y][box_x] * 100 / (box_w * box_h);
-            }
-        }
+    // set motion, will be true if ...
+    // - at least one box has 10% pixels different
+    // - at least two boxex have 5% pixels different
+    // - at least three boxex have 3% pixels different
+    *motion = (box10cnt >= 1 || box5cnt >= 2 || box3cnt >= 3);
+    *motion = true; //ZZZ temp test
 
-        // count number of boxes with greater than 10%, 5%, and 3% pixels different
-        for (box_y = 0; box_y < MAX_BOX_Y; box_y++) {
-            for (box_x = 0; box_x < MAX_BOX_X; box_x++) {
-                if (box[box_y][box_x] >= 10) {
-                    box10cnt++;
-                } 
-                if (box[box_y][box_x] >= 5) {
-                    box5cnt++;
-                } 
-                if (box[box_y][box_x] >= 3) {
-                    box3cnt++;
-                } 
-            }
-        }
-
-        // set motion_detected, will be true if ...
-        // - at least one box has 10% pixels different
-        // - at least two boxex have 5% pixels different
-        // - at least three boxex have 3% pixels different
-        motion_detected = (box10cnt >= 1 || box5cnt >= 2 || box3cnt >= 3);
-        motion_detected = true; //XXX test
-
-        // determine pixel average brightness difference
-        brightness_diff = pixel_avg - gs_save_pixel_avg;
-        if (brightness_diff < 0.0) {
-            brightness_diff = -brightness_diff;
-        }
-
-        // set brightness_change_detected if ...
-        // - pixel average has changed by 5
-        brightness_change_detected = (brightness_diff >= 5);
+    // determine pixel average brightness difference;
+    // set brightness_change_detected if  pixel average has changed by 5
+    brightness_diff = gs2_pixel_avg - gs1_pixel_avg;
+    if (brightness_diff < 0.0) {
+        brightness_diff = -brightness_diff;
+    }
+    *brightness = (brightness_diff >= 5);
 
 #if 0
-        // print the box, ...
-        if (motion_detected) {
-            INFO("--------------------------------------------------\n");
-            for (box_y = 0; box_y < MAX_BOX_Y; box_y++) {
-                INFO("%4d %4d %4d %4d %4d %4d %4d %4d \n",
-                       box[box_y][0], box[box_y][1], box[box_y][2], box[box_y][3],
-                       box[box_y][4], box[box_y][5], box[box_y][6], box[box_y][7]);
-            }
-            INFO("width=%d height=%d box_w=%d box_h=%d\n",
-                   width, height, box_w, box_h);
-            INFO("MOTION_DETECTED - box10cnt=%d box5cnt=%d box3cnt=%d\n", 
-                   box10cnt, box5cnt, box3cnt);
+    // print the box, ...
+    if (*motion) {
+        INFO("-------- motion %d  brightness %d --------\n", *motion, *brightness);
+        for (box_y = 0; box_y < MAX_BOX_Y; box_y++) {
+            INFO("%4d %4d %4d %4d %4d %4d %4d %4d \n",
+                   box[box_y][0], box[box_y][1], box[box_y][2], box[box_y][3],
+                   box[box_y][4], box[box_y][5], box[box_y][6], box[box_y][7]);
         }
-        if (brightness_change_detected) {
-            INFO("BRIGHTNESS_CHANGE_DETECTED: brightness_diff=%.1f\n",
-                   brightness_diff);
-        }
+        INFO("width=%d height=%d box_w=%d box_h=%d\n",
+               width, height, box_w, box_h);
+        INFO("MOTION_DETECTED - box10cnt=%d box5cnt=%d box3cnt=%d\n", 
+               box10cnt, box5cnt, box3cnt);
+    }
+    if (*brightness) {
+        INFO("BRIGHTNESS_CHANGE_DETECTED: brightness_diff=%.1f\n",
+               brightness_diff);
+    }
 #endif
-    } else {
-        uint32_t x, y, pixel_sum=0, idx=0;
-
-        // there is no prior to compare against ...
-
-        // pixel_avg needs to be computed because it is needed by code below
-        for (y = 0; y < height; y++) {
-            for (x = 0; x < width; x++) {
-                pixel_sum += gs_curr[idx++];
-            }
-        }
-        pixel_avg = (double)pixel_sum / (width*height);
-
-        // set motion_detected and brightness_change_detected to true when there is no prior to compare
-        motion_detected = true;
-        brightness_change_detected = true;
-    }
-
-    // if motion detected then set return motion flag and new_image flat to true;
-    // keep return motion and new_image flags set for 2 seconds beyond when motion_detected clears
-    if (motion_detected) {
-        last_motion_detected_time_us = time_us;
-        *motion = true;
-        *new_image = true;
-    } else if (time_us - last_motion_detected_time_us < 2000000) {
-        *motion = true;
-        *new_image = true;
-    }
-
-    // if brightness has changed then set new image return
-    if (brightness_change_detected) {
-        *new_image = true;
-    }
-
-    // if last new_image is greater than 2 secs ago then return new_image
-    if (*new_image) {
-        last_new_image_time_us = time_us;
-    } else if (time_us - last_new_image_time_us > 2000000) {
-        last_new_image_time_us = time_us;
-        *new_image = true;
-    }
-
-    // if returning new_image then save new baseline
-    if (*new_image) {
-        free(gs_save);
-        gs_save = gs_curr;
-        gs_save_pixel_avg = pixel_avg;
-        gs_save_width = width;
-        gs_save_height = height;
-    } else {
-        free(gs_curr);
-    }
-
-    // return success
-    return 0;
 }
 
 int cam_settings_read(void)
@@ -1404,8 +1504,8 @@ void * rp_toc_init_thread(void * cx)
         frame_file_offset = rpfh.prior_frame_file_offset;
 
         // sleep periodically to give the other threads a chance to run
-        if (microsec_timer() - run_start_time_us > SLEEP_US) {
-            usleep(SLEEP_US);
+        if (microsec_timer() - run_start_time_us > 50*MS) {
+            usleep(50*MS);
             run_start_time_us = microsec_timer();
         }
     }
@@ -1425,11 +1525,8 @@ void * rp_toc_init_thread(void * cx)
 
 void * rp_write_file_frame_thread(void * cx)
 {
-    uint64_t  frame_post_head;
-    uint64_t  frame_count_last;
     uint64_t  last_file_hdr_write_time_us;
     uint64_t  last_frame_written_real_time_us;
-    uint64_t  last_frame_posted_real_time_us;
     bool      last_frame_is_gap;
     uint64_t  real_minus_monotonic_time_us;
 
@@ -1437,23 +1534,22 @@ void * rp_write_file_frame_thread(void * cx)
     char      ts1[MAX_TIME_STR], ts2[MAX_TIME_STR];
     int       ret, loop_count;
 
+    frame_t * record_frame = NULL;
+
     // starting notice
     INFO("starting\n");
 
     // init
     pthread_detach(pthread_self());
-    frame_post_head                 = 0;
-    frame_count_last                = 0;
     last_file_hdr_write_time_us     = 0;
     last_frame_written_real_time_us = rp_file_hdr.last_frame_valid_through_real_time_us;
-    last_frame_posted_real_time_us  = rp_file_hdr.last_frame_valid_through_real_time_us;
     last_frame_is_gap               = false;
 
     // wait for system clock to be set
     rp_status = STATUS_ERR_SYSTEM_CLOCK_NOT_SET;
     loop_count = 0;
     while (true) {
-        if (system_clock_is_set()) {
+        if (ntp_synced()) { 
             break;
         }
         sleep(loop_count++ < 60 ? 1 : 60);
@@ -1465,16 +1561,16 @@ void * rp_write_file_frame_thread(void * cx)
 
     while (true) {
         // sleep
-        usleep(SLEEP_US);
+        usleep(10*MS);
 
         // if there is a prior frame and 
-        //    it has been more than 5 second since last frame and
+        //    it has been more than 10 second since last frame and
         //    the last frame is not a gap frame
         // then
         //    write gap frame
         // endif
         if (rp_file_hdr.last_frame_valid_through_real_time_us != 0 &&
-            get_real_time_us() > rp_file_hdr.last_frame_valid_through_real_time_us + 5000000 && 
+            get_real_time_us() > rp_file_hdr.last_frame_valid_through_real_time_us + 10000000 && 
             !last_frame_is_gap) 
         {
             this_frame_real_time_us = rp_file_hdr.last_frame_valid_through_real_time_us+1;
@@ -1491,14 +1587,16 @@ void * rp_write_file_frame_thread(void * cx)
                 last_frame_written_real_time_us = this_frame_real_time_us;
                 rp_file_hdr.last_frame_valid_through_real_time_us = this_frame_real_time_us;
             } else {
-                // xxx this print may flood;  as may others
                 ERROR("gap frame time %s.%6.6d is less than last %s.%6.6d\n",
                       time2str(ts1, this_frame_real_time_us / 1000000, false),
                       (int)(this_frame_real_time_us % 1000000),
                       time2str(ts2, last_frame_written_real_time_us / 1000000, false),
                       (int)(last_frame_written_real_time_us % 1000000));
             }
-        } else if (last_frame_is_gap) {
+        } 
+
+        // XXX was else, comment this
+        if (last_frame_is_gap) {
             uint64_t rt_us = get_real_time_us();
             if (rt_us > rp_file_hdr.last_frame_valid_through_real_time_us) {
                 rp_file_hdr.last_frame_valid_through_real_time_us = rt_us;
@@ -1510,85 +1608,50 @@ void * rp_write_file_frame_thread(void * cx)
             goto skip;
         }
 
-        // copy posted frames to file
-        loop_count = 0;
-        while (frame_post_head < frame_post_tail && loop_count++ < 10) {
-            frame_t f;
+        // copy up to 10 frames to the file
+        for (loop_count = 0; loop_count < 10; loop_count++) {
 
-            // if we are too far behind then skip frames
-            if (frame_post_tail - frame_post_head > MAX_FRAME_BEHIND) {
-                WARN("too far behind, skipping %d frames\n",
-                     (int)(frame_post_tail-frame_post_head-MAX_FRAME_BEHIND));
-                frame_post_head = frame_post_tail - MAX_FRAME_BEHIND;
+            // attempt to get next record_frame from proc_frame_list, if none then break out of the while loop
+            pthread_mutex_lock(&proc_frame_list_mutex);
+            if (TAILQ_EMPTY(&proc_frame_list) || record_frame == TAILQ_LAST(&proc_frame_list,th1)) {
+                pthread_mutex_unlock(&proc_frame_list_mutex);
+                break;
+            } else if (record_frame == NULL) {
+                record_frame = TAILQ_LAST(&proc_frame_list,th1);
+                record_frame->ref_count++;
+            } else {
+                record_frame->ref_count--;
+                record_frame = TAILQ_NEXT(record_frame,entries);
+                record_frame->ref_count++;
             }
-
-            // make copy of frame header to be processed
-            f = frame[FPH];
-
-            // if frame does not contain image then skip
-            if (f.state == FRAME_STATE_NO_IMAGE) {
-                frame_post_head++;
-                continue;
-            }
-
-            // f.state must now be FRAME_STATE_IMAGE_NEW or FRAME_STATE_IMAGE_SAME
-            if (f.state != FRAME_STATE_IMAGE_NEW && f.state != FRAME_STATE_IMAGE_SAME) {
-                ERROR("frame_state %d is not FRAME_STATE_IMAGE_NEW or FRAME_STATE_IMAGE_SAME\n", 
-                      f.state);
-                frame_post_head++;
-                continue;
-            }
-
-            // if frame count is less than the last then skip
-            if (f.count <= frame_count_last) {
-                ERROR("frame_count has gone backward, curr=%"PRId64" last=%"PRId64"\n", 
-                      f.count, frame_count_last);
-                frame_post_head++;
-                continue;
-            }
-            frame_count_last = f.count;
+            pthread_mutex_unlock(&proc_frame_list_mutex);
 
             // if frame time is less than last written then skip
-            this_frame_real_time_us = f.time_us + real_minus_monotonic_time_us;
+            this_frame_real_time_us = record_frame->time_us + real_minus_monotonic_time_us;
             if (this_frame_real_time_us <= last_frame_written_real_time_us) {
                 ERROR("frame time %s.%6.6d lte last_written %s.%6.6d\n",
                       time2str(ts1, this_frame_real_time_us / 1000000, false),
                       (int)(this_frame_real_time_us % 1000000),
                       time2str(ts2, last_frame_written_real_time_us / 1000000, false),
                       (int)(last_frame_written_real_time_us % 1000000));
-                frame_post_head++;
                 continue;
             }
 
-            // if frame time is less than last posted then skip
-            if (this_frame_real_time_us <= last_frame_posted_real_time_us) {
-                ERROR("frame time %s.%6.6d lte last_posted %s.%6.6d\n",
-                      time2str(ts1, this_frame_real_time_us / 1000000, false),
-                      (int)(this_frame_real_time_us % 1000000),
-                      time2str(ts2, last_frame_posted_real_time_us / 1000000, false),
-                      (int)(last_frame_posted_real_time_us % 1000000));
-                frame_post_head++;
-                continue;
+            // write frame to file
+            ret = rp_write_frame(this_frame_real_time_us, 
+                                 record_frame->buff, 
+                                 record_frame->buff_len,
+                                 record_frame->motion);
+            if (ret < 0) {
+                ERROR("failed to write frame\n");
+                pthread_rwlock_unlock(&cam_init_webcam_rwlock);
+                goto error;
             }
-            last_frame_posted_real_time_us = this_frame_real_time_us;
-            
-            // check if frame needs to be written to file; if so then write it
-            if (f.state == FRAME_STATE_IMAGE_NEW || last_frame_is_gap) {
-                ret = rp_write_frame(this_frame_real_time_us, bufmap[f.buffer.index].addr, f.buffer.bytesused, f.motion);
-                if (ret < 0) {
-                    ERROR("failed to write frame\n");
-                    pthread_rwlock_unlock(&cam_init_webcam_rwlock);
-                    goto error; // XXX ?
-                }
-                last_frame_is_gap = false;
-                last_frame_written_real_time_us = this_frame_real_time_us;
-            } 
+            last_frame_is_gap = false;
+            last_frame_written_real_time_us = this_frame_real_time_us;
 
             // save last_frame_valid_through_real_time_us 
             rp_file_hdr.last_frame_valid_through_real_time_us = this_frame_real_time_us;
-
-            // increment frame_post_head
-            frame_post_head++;
         }
 
         // release cam_init_webcam_rwlock

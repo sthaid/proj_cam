@@ -46,7 +46,7 @@ int main(int argc, char **argv)
     // parse options
     p2p = &p2p1;
     while (true) {
-        opt_char = getopt(argc, argv, "Pu:p:");
+        opt_char = getopt(argc, argv, "Pu:p:v");
         if (opt_char == -1) {
             break;
         }
@@ -60,8 +60,11 @@ int main(int argc, char **argv)
         case 'p':
             password = optarg;
             break;
+        case 'v':
+            PRINTF("version %d.%d\n", VERSION_MAJOR, VERSION_MINOR);
+            return 0;   
         default:
-            exit(1);
+            return 1;
         }
     }
 
@@ -71,6 +74,7 @@ int main(int argc, char **argv)
         PRINTF("  -P: use http proxy server\n");
         PRINTF("  -u <user_name>: override WC_USER_NAME environment value\n");
         PRINTF("  -p <password>: override WC_PASSWORD environment value\n");
+        PRINTF("  -v: display version and exit\n");
         return 1;
     }
     wc_name = argv[optind];

@@ -45,6 +45,18 @@
 #define SOCK_CLOEXEC 0
 #endif
 
+// -----------------  VERSION  ------------------------------------------------------
+
+#define VERSION_MAJOR 1
+#define VERSION_MINOR 0
+
+#define VERSION ( { version_t v = { VERSION_MAJOR, VERSION_MINOR }; v; } );
+
+typedef struct {
+    int major;
+    int minor;
+} version_t;
+
 // -----------------  CONFIG READ/WRITE  --------------------------------------------
 
 #define MAX_CONFIG_VALUE_STR 100
@@ -172,6 +184,7 @@ typedef struct {
     int pad;
     union {
         struct {
+            version_t version;
             char wc_macaddr[MAX_WC_MACADDR+1];
             struct sockaddr_in wc_addr_behind_nat;
             char dgram_end;
@@ -373,6 +386,7 @@ typedef struct {
             bool     motion;
         } mt_frame;
         struct status_s {
+            version_t version;
             uint32_t cam_status;
             uint32_t rp_status;
             uint64_t rp_duration_us;
@@ -512,6 +526,8 @@ typedef struct {
 #define MAX_TIME_STR    32
 #define MAX_INT_STR     32
 
+extern int64_t system_clock_offset_us;
+
 int getsockaddr(char * node, int port, int socktype, int protcol, struct sockaddr_in * ret_addr);
 void set_sock_opts(int sfd, int reuseaddr, int sndbuf, int rcvbuf, int rcvto);
 char * sock_to_options_str(int sfd, char * s, int slen);
@@ -525,7 +541,8 @@ void convert_yuy2_to_gs(uint8_t * yuy2, uint8_t * gs, int pixels);
 uint64_t microsec_timer(void);
 uint64_t get_real_time_us(void);
 char * time2str(char * str, time_t time, bool gmt);
-bool system_clock_is_set(void);
+bool ntp_synced(void);
+void real_time_init(void);
 uint64_t fs_avail_bytes(char * path);
 char * status2str(uint32_t status);
 char * int2str(char * str, int64_t n);

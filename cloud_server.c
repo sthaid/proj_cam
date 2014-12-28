@@ -37,6 +37,7 @@ typedef struct {
 } user_t;
 
 typedef struct {
+    version_t version;
     char wc_macaddr[MAX_WC_MACADDR+1];
     struct sockaddr_in wc_addr;
     struct sockaddr_in wc_addr_behind_nat;
@@ -80,6 +81,7 @@ bool cmd_ls(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_ls_onl_wc(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_password(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_delete_account(user_t * u, FILE * fp, int argc, char ** argv);
+bool cmd_version(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_exit(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_su(user_t * u, FILE * fp, int argc, char ** argv);
 void read_all_user_files(void);
@@ -554,6 +556,8 @@ cmd_tbl_t cmd_tbl[] = {
       "password <curr_passwd> <new_passwd> - change password" },
     { "delete_account", cmd_delete_account, 0, 0, false,
       "delete_account - deletes the current user account and logout" },
+    { "version", cmd_version, 0, 0, false,
+      "version - display program version" },
     { "exit", cmd_exit, 0, 0, false,
       "exit - logout" },
 
@@ -874,6 +878,13 @@ bool cmd_delete_account(user_t * u, FILE * fp, int argc, char ** argv)
     return true;
 }
 
+// version - display program version
+bool cmd_version(user_t * u, FILE * fp, int argc, char ** argv) 
+{
+    prcl(fp, "version %d.%d\n", VERSION_MAJOR, VERSION_MINOR);
+    return false;
+}
+
 // exit - logout
 bool cmd_exit(user_t * u, FILE * fp, int argc, char ** argv) 
 {
@@ -1131,8 +1142,8 @@ void display_wc(FILE * fp, char * wc_macaddr, user_t * u, int u_wc_idx)
 {
     int i, j;
     bool online;
-    struct sockaddr_in online_wc_addr;
-    char s[100];
+    char online_wc_addr_str[100] = "";
+    char online_wc_version_str[100] = "";
 
     // if user not supplied then attempt to find the user that owns this wc
     if (u == NULL) {
@@ -1155,27 +1166,30 @@ void display_wc(FILE * fp, char * wc_macaddr, user_t * u, int u_wc_idx)
 
     // search the onl_wc table to see if it online, and if so find its wc_addr
     online = false;
-    bzero(&online_wc_addr, sizeof(online_wc_addr));
     for (i = 0; i < max_onl_wc; i++) {
         if (onl_wc[i].wc_macaddr[0] != '\0' &&
             strcmp(wc_macaddr, onl_wc[i].wc_macaddr) == 0) 
         {
             online = true;
-            online_wc_addr = onl_wc[i].wc_addr;
+            sock_addr_to_str(online_wc_addr_str, sizeof(online_wc_addr_str), 
+                             (struct sockaddr *)&onl_wc[i].wc_addr);
+            sprintf(online_wc_version_str, "%d.%d", 
+                    onl_wc[i].version.major, onl_wc[i].version.minor);
             break;
         }
     }
 
     // display, examples:
     // wc1          steve        80:1f:02:d3:9f:0c   offline
-    // wc1          steve        80:1f:02:d3:9f:0c   online     14.91.92.44:7575
-    // ---          ---          80:1f:02:d3:9f:0c   online     14.91.92.44:7575
-    prcl(fp, "%-12s %-12s %-17s %-7s %s\n",
+    // wc1          steve        80:1f:02:d3:9f:0c   online     14.91.92.44:7575  1.0
+    // ---          ---          80:1f:02:d3:9f:0c   online     14.91.92.44:7575  1.0
+    prcl(fp, "%-12s %-12s %-17s %-7s  %s  %s\n",
          u ? u->wc[u_wc_idx].wc_name : "---",
          u ? u->user_name : "---",
          wc_macaddr,
-         online ? "online" : "offline",
-         online ?  sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&online_wc_addr) : "");
+         online ? "online " : "offline",
+         online_wc_addr_str,
+         online_wc_version_str);
 }
 
 int verify_user_name_and_password(char * user_name, char *password) 
@@ -1459,6 +1473,7 @@ void * dgram_thread(void * cx)
                     break;
                 }
 
+                onl_wc[idx].version = dgram_rcv.u.wc_announce.version;
                 strcpy(onl_wc[idx].wc_macaddr, dgram_rcv.u.wc_announce.wc_macaddr);
                 onl_wc[idx].wc_addr = *wc_addr;
                 onl_wc[idx].wc_addr_behind_nat = dgram_rcv.u.wc_announce.wc_addr_behind_nat;

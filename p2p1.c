@@ -411,6 +411,7 @@ int p2p1_accept(char * wc_macaddr, int * service, char * user_name)
             close(sfd);
             return -1;
         }
+        dgram.u.wc_announce.version = VERSION;
 
         // debug print the dgram we are about to send
         DEBUG_PRINT_DGRAM(false, &dgram, offsetof(dgram_t,u.wc_announce.dgram_end));

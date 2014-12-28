@@ -5,11 +5,8 @@
 #include <SDL_ttf.h>
 #include <SDL_mixer.h>
 
-// XXX problem changing wc resolution, why is the usleep call near "window resize event"
-// XXX maybe p2p1/2 should use real time threads
-// XXX include playback duration in stats
+// XXX maybe p2p1/2 should use real time threads     IN OTHER FILE
 // XXX use SET_CTL_MODE_PLAYBACK_TIME(delta_us)
-// XXX direct log output to a file
 
 // ZZZ review all ifdef ANDROID
 // ZZZ review all struct fields
@@ -91,6 +88,22 @@
 #define MOUSE_EVENT_WC_RES                    160    // 4 webcams
 #define MOUSE_EVENT_WC_NAME_LIST              170    // 8 list events per wc, 32 total
 
+#define STATE_NOT_CONNECTED                   0
+#define STATE_CONNECTING                      1
+#define STATE_CONNECTED                       2
+#define STATE_CONNECTING_ERROR                3
+#define STATE_CONNECTED_ERROR                 4
+#define STATE_FATAL_ERROR                     5
+
+#define STATE_STR(state) \
+   ((state) == STATE_NOT_CONNECTED     ? "STATE_NOT_CONNECTED"     : \
+    (state) == STATE_CONNECTING        ? "STATE_CONNECTING"        : \
+    (state) == STATE_CONNECTED         ? "STATE_CONNECTED"         : \
+    (state) == STATE_CONNECTING_ERROR  ? "STATE_CONNECTING_ERROR"  : \
+    (state) == STATE_CONNECTED_ERROR   ? "STATE_CONNECTED_ERROR"   : \
+    (state) == STATE_FATAL_ERROR       ? "STATE_FATAL_ERROR"         \
+                                       : "????")
+
 #define SERVER_CHECK_STATUS_NOT_RUN           0
 #define SERVER_CHECK_STATUS_IN_PROGRESS       1
 #define SERVER_CHECK_STATUS_OK                2
@@ -125,8 +138,8 @@
         mode.mode = MODE_PLAYBACK; \
         if (mode.pb_submode == PB_SUBMODE_PLAY) { \
             mode.pb_real_time_us = PB_SUBMODE_PLAY_REAL_TIME_US(&mode); \
-            if (mode.pb_real_time_us > (uint64_t)time(NULL) * 1000000) { \
-                mode.pb_real_time_us = (uint64_t)time(NULL) * 1000000; \
+            if (mode.pb_real_time_us > get_real_time_us()) { \
+                mode.pb_real_time_us = get_real_time_us(); \
             } \
         } \
         mode.pb_mode_entry_real_time_us = get_real_time_us(); \
@@ -212,16 +225,30 @@
         config_write(config_path, config, config_version); \
     } while (0)
 
+#define CVT_INTERVAL_SECS_TO_DAY_HMS(dur_secs, days, hours, minutes, seconds) \
+    do { \
+        time_t d = (dur_secs); \
+        (days) = d / 86400; \
+        d -= ((days) * 86400); \
+        (hours) = d / 3600; \
+        d -= ((hours) * 3600); \
+        (minutes) = d / 60; \
+        d -= ((minutes) * 60); \
+        (seconds) = d; \
+    } while (0)
+
 //
 // typedefs
 //
 
 typedef struct {//ZZZ comment fields sections
+    uint32_t        state;
     struct mode_s   mode;
     struct status_s status; 
     int             p2p_id;
     uint64_t        recvd_bytes;
     uint64_t        recvd_frames;
+    uint32_t        frame_status;
 
     SDL_Texture   * texture;
     int             texture_w;
@@ -331,6 +358,9 @@ int main(int argc, char **argv)
     if (ret < 0) {
         WARN("setrlimit for core dump, %s\n", strerror(errno));
     }
+
+    // init real time clock
+    real_time_init();
 
     // read viewer config
 #ifndef ANDROID
@@ -450,7 +480,8 @@ int main(int argc, char **argv)
 
     // return success
     INFO("program terminating\n");
-    return 0;
+    exit(0); 
+    // XXX ??? return 0;
 }
 
 // -----------------  SERVER_CHECK  --------------------------------------
@@ -550,6 +581,7 @@ void display_handler(void)
     char        date_and_time_str[MAX_TIME_STR];
     SDL_Event   ev;
     bool        event_handled;
+    uint64_t    curr_us;
 
     SDL_Rect    ctlpane;
     SDL_Rect    ctlbpane;
@@ -679,7 +711,7 @@ void display_handler(void)
             if (win_height < WIN_HEIGHT_MIN) {
                 win_height = WIN_HEIGHT_MIN;
             }
-            usleep(1000*MS);
+            usleep(1000*MS);  // XXX why is this delay needed?
             SDL_SetWindowSize(window, win_width, win_height);
         }
         event.window_resize_event = false;
@@ -706,7 +738,7 @@ void display_handler(void)
             config_keybd_shift  = false;
 
         } else if (event.mouse_event == MOUSE_EVENT_STATUS_SELECT) {
-            status_select = (status_select + 1) % 3;
+            status_select = (status_select + 1) % 5;
 
         } else if (event.mouse_event == MOUSE_EVENT_PLAYBACK_STOP) {
             SET_CTL_MODE_PLAYBACK_STOP(false);
@@ -849,41 +881,47 @@ void display_handler(void)
         event_handled = true;
     }
 
-#if 0 //XXX tbd
-    // ---------------------------------------------------------------------------------
-    // ---- if playback mode and connected webcam are eod or bod then stop playback ----
-    // ---------------------------------------------------------------------------------
+    // -------------------------------------------------------------------------------------
+    // ---- if playback mode and all connected webcam are eod or bod then stop playback ----
+    // -------------------------------------------------------------------------------------
 
-    if (mode.mode == MODE_PLAYBACK && mode.pb_submode == PB_SUBMODE_PLAY) {
+    if (mode.mode == MODE_PLAYBACK && mode.pb_submode == PB_SUBMODE_PLAY && mode.pb_dir == PB_DIR_FWD) {
         bool all_eod = true;
-        bool all_bod = true;
         for (i = 0; i < MAX_WEBCAM; i++) {
             webcam_t * wc = &webcam[i];
-            if (wc->state == STATE_CONNECTED && wc->last_frame_status != STATUS_ERR_FRAME_BEFORE_BOD) {
-                all_bod = false;
-            }
-            if (wc->state == STATE_CONNECTED && wc->last_frame_status != STATUS_ERR_FRAME_AFTER_EOD) {
+            if (wc->state == STATE_CONNECTED && wc->frame_status != STATUS_ERR_FRAME_AFTER_EOD) {
                 all_eod = false;
             }
         }
-        if (all_eod || all_bod) {
+        if (all_eod) {
             SET_CTL_MODE_PLAYBACK_STOP(false);
         }
-
-        XXX and make sure display needs to be rendered
+        event_handled = true;
     }
-#endif
+
+    if (mode.mode == MODE_PLAYBACK && mode.pb_submode == PB_SUBMODE_PLAY && mode.pb_dir == PB_DIR_REV) {
+        bool all_bod = true;
+        for (i = 0; i < MAX_WEBCAM; i++) {
+            webcam_t * wc = &webcam[i];
+            if (wc->state == STATE_CONNECTED && wc->frame_status != STATUS_ERR_FRAME_BEFORE_BOD) {
+                all_bod = false;
+            }
+        }
+        if (all_bod) {
+            SET_CTL_MODE_PLAYBACK_STOP(false);
+        }
+        event_handled = true;
+    }
 
     // ------------------------------------------------
     // ---- check if display needs to be rendered, ----
     // ---- if not then return                     ----
     // ------------------------------------------------
-    // ZZZ review number of calls to microsec_timer
 
     // create the data_and_tims_str
     time_t secs;
     if (mode.mode == MODE_LIVE) {
-        secs = time(NULL);
+        secs = get_real_time_us() / 1000000;
         time2str(date_and_time_str, secs, CONFIG_LOCALTIME=='N');
     } else if (mode.mode == MODE_PLAYBACK) {
         if (mode.pb_submode == PB_SUBMODE_PLAY) {
@@ -899,13 +937,15 @@ void display_handler(void)
     // the following conditions require display update
     // - event was handled
     // - an image had changed
-    // - date_and_time_str has changed and last update > 100ms ago
-    // - keyboard input is in progress and last update > 100ms ago
-    // - server_check is in progress and last update > 100ms ago
+    // - date_and_time_str has changed and last update > 100 ms ago
+    // - keyboard input is in progress and last update > 100 ms ago
+    // - server_check is in progress and last update > 100 ms ago
+    // - last update > 1 sec ago
     // if none of these conditions exist then return
     static char     last_date_and_time_str[MAX_TIME_STR];
     static uint64_t last_image_change[MAX_WEBCAM];
     static uint64_t last_window_update_us;
+    curr_us = microsec_timer();
     do {
         if (event_handled) {
             break;
@@ -921,20 +961,24 @@ void display_handler(void)
         }
 
         if (strcmp(date_and_time_str, last_date_and_time_str) != 0 &&
-            microsec_timer() - last_window_update_us > 100*MS)
+            curr_us - last_window_update_us > 100*MS)
         {
             break;
         }
 
         if (config_keybd_mode != CONFIG_KEYBD_MODE_INACTIVE &&
-            microsec_timer() - last_window_update_us > 100*MS) 
+            curr_us - last_window_update_us > 100*MS) 
         {
             break;
         }
 
         if (server_check_status == SERVER_CHECK_STATUS_IN_PROGRESS &&
-            microsec_timer() - last_window_update_us > 100*MS) 
+            curr_us - last_window_update_us > 100*MS) 
         {
+            break;
+        }
+
+        if (curr_us - last_window_update_us > 1000*MS) {
             break;
         }
 
@@ -944,7 +988,7 @@ void display_handler(void)
         last_image_change[i] = webcam[i].image_change;
     }
     strcpy(last_date_and_time_str, date_and_time_str);
-    last_window_update_us = microsec_timer();
+    last_window_update_us = curr_us;
 
     // --------------------------------------------
     // ---- reinit the list of positions       ----
@@ -1030,6 +1074,7 @@ void display_handler(void)
         // 
         // -- TIME --
         // LOCALTIME
+        // OFF=5000 MS
 
         // title line
         render_text(&ctlpane, 0, 0, "CONFIGURE", MOUSE_EVENT_NONE);
@@ -1038,7 +1083,7 @@ void display_handler(void)
         render_text(&ctlpane, 2, 0, "-- SERVER --", MOUSE_EVENT_NONE);
 
         if (config_keybd_mode == CONFIG_KEYBD_MODE_USERNAME) {
-            bool cursor_blink_on = ((microsec_timer() % 1000000) > 500000);
+            bool cursor_blink_on = ((curr_us % 1000000) > 500000);
             len = strlen(config_keybd_str);
             strcpy(str, len < CTL_COLS ? config_keybd_str : config_keybd_str + (len-CTL_COLS+1));
             if (cursor_blink_on) {
@@ -1051,7 +1096,7 @@ void display_handler(void)
         render_text(&ctlpane, 3, 0, str, MOUSE_EVENT_CONFIG_USERNAME);
 
         if (config_keybd_mode == CONFIG_KEYBD_MODE_PASSWORD) {
-            bool cursor_blink_on = ((microsec_timer() % 1000000) > 500000);
+            bool cursor_blink_on = ((curr_us % 1000000) > 500000);
             len = strlen(config_keybd_str);
             strcpy(str, len < CTL_COLS ? config_keybd_str : config_keybd_str + (len-CTL_COLS+1));
             if (cursor_blink_on) {
@@ -1082,6 +1127,8 @@ void display_handler(void)
         render_text(&ctlpane, 14, 0, 
                     CONFIG_LOCALTIME == 'N' ? "GMT" : "LOCALTIME",
                     MOUSE_EVENT_CONFIG_TIME);
+        sprintf(str, "OFF=%"PRId64" MS", system_clock_offset_us/1000);
+        render_text(&ctlpane, 15, 0, str, MOUSE_EVENT_NONE);
     }
 
     // --------------------------------
@@ -1246,7 +1293,6 @@ void display_handler(void)
     // ---------------------------------
 
     // XXX also add set time
-    // XXX also need stats selection for amount of playback data
     if (mode.mode == MODE_PLAYBACK && !config_mode) {
         // Ctl Pane ...
         //
@@ -1331,7 +1377,6 @@ void display_handler(void)
 
         case 0: {  // FRAMES/SEC
             uint64_t        delta_us;
-            uint64_t        curr_us = microsec_timer();
 
             static uint64_t last_us;
             static uint64_t last_recvd_frames[MAX_WEBCAM];
@@ -1341,6 +1386,7 @@ void display_handler(void)
             //   recompute rates
             //   save last values
             // endif
+            curr_us = microsec_timer();
             delta_us = curr_us - last_us;
             if (delta_us > 5000*MS) {
                 for (i = 0; i < MAX_WEBCAM; i++) {
@@ -1381,6 +1427,38 @@ void display_handler(void)
                 render_text(&ctlbpane, i+1, 0, str, MOUSE_EVENT_NONE);
             }
             break; }
+
+        case 3: { // REC DURATION
+            render_text(&ctlbpane, 0, 0, "REC DURATION", MOUSE_EVENT_STATUS_SELECT);
+            for (i = 0; i < MAX_WEBCAM; i++) {
+                uint32_t days, hours, minutes, seconds;
+
+                if (webcam[i].state == STATE_CONNECTED) {
+                    CVT_INTERVAL_SECS_TO_DAY_HMS(webcam[i].status.rp_duration_us/1000000,
+                                                days, hours, minutes, seconds);
+                    sprintf(str, "%c %d:%02d:%02d", 'A'+i, 24*days+hours, minutes, seconds);
+                } else {
+                    sprintf(str, "%c not conn", 'A'+i);
+                }
+                render_text(&ctlbpane, i+1, 0, str, MOUSE_EVENT_NONE);
+            }
+            break; }
+
+        case 4: { // VERSION 1.0
+            sprintf(str, "VERSION %d.%d", VERSION_MAJOR, VERSION_MINOR);
+            render_text(&ctlbpane, 0, 0, str, MOUSE_EVENT_STATUS_SELECT);
+            for (i = 0; i < MAX_WEBCAM; i++) {
+                if (webcam[i].state == STATE_CONNECTED) {
+                    sprintf(str, "%c %d.%d", 'A'+i, 
+                            webcam[i].status.version.major,
+                            webcam[i].status.version.minor);
+                } else {
+                    sprintf(str, "%c not conn", 'A'+i);
+                }
+                render_text(&ctlbpane, i+1, 0, str, MOUSE_EVENT_NONE);
+            }
+            break; }
+
         }
     }
 
@@ -1477,28 +1555,12 @@ void render_text_ex(SDL_Rect * pane, int row, int col, char * str, int mouse_eve
 
 void * webcam_thread(void * cx) 
 {
-    #define STATE_NOT_CONNECTED         0
-    #define STATE_CONNECTING            1
-    #define STATE_CONNECTED             2
-    #define STATE_CONNECTING_ERROR      3
-    #define STATE_CONNECTED_ERROR       4
-    #define STATE_FATAL_ERROR           5
-
-    #define STATE_STR(state) \
-           ((state) == STATE_NOT_CONNECTED     ? "STATE_NOT_CONNECTED"     : \
-            (state) == STATE_CONNECTING        ? "STATE_CONNECTING"        : \
-            (state) == STATE_CONNECTED         ? "STATE_CONNECTED"         : \
-            (state) == STATE_CONNECTING_ERROR  ? "STATE_CONNECTING_ERROR"  : \
-            (state) == STATE_CONNECTED_ERROR   ? "STATE_CONNECTED_ERROR"   : \
-            (state) == STATE_FATAL_ERROR       ? "STATE_FATAL_ERROR"         \
-                                               : "????")
-
     #define STATE_CHANGE(new_state, s1, s2, s3) \
         do { \
-            if ((new_state) != state) { \
+            if ((new_state) != wc->state) { \
                 INFO("wc %c: %s -> %s '%s' '%s' %s\n", \
-                    id_char, STATE_STR(state), STATE_STR(new_state), s1, s2, s3); \
-                state = (new_state); \
+                    id_char, STATE_STR(wc->state), STATE_STR(new_state), s1, s2, s3); \
+                wc->state = (new_state); \
                 last_state_change_time_us = microsec_timer(); \
                 DISPLAY_TEXT(s1,s2,s3); \
             } \
@@ -1565,7 +1627,6 @@ void * webcam_thread(void * cx)
          strcmp(CONFIG_USERNAME, NO_USERNAME) != 0 && \
          strcmp(CONFIG_PASSWORD, NO_PASSWORD) != 0)
 
-//XXX last_frame_status cleared here
     #define DISCONNECT() \
         do { \
             if (handle != INVALID_HANDLE) { \
@@ -1586,7 +1647,6 @@ void * webcam_thread(void * cx)
     webcam_t       * wc      = &webcam[id];
     p2p_routines_t * p2p     = NULL;
     int              handle  = INVALID_HANDLE;
-    int              state   = STATE_NOT_CONNECTED;
 
     uint64_t         last_state_change_time_us = microsec_timer();
     uint64_t         last_status_msg_recv_time_us = microsec_timer();
@@ -1597,6 +1657,7 @@ void * webcam_thread(void * cx)
 
     // init non-zero fields of wc
     pthread_mutex_init(&wc->image_mutex,NULL);
+    wc->state = STATE_NOT_CONNECTED;
     wc->change_name_request = -1;
     DISPLAY_WC_NAME(CONFIG_WC_NAME(id));
 
@@ -1625,7 +1686,7 @@ void * webcam_thread(void * cx)
         }
 
         // state processing
-        switch (state) {
+        switch (wc->state) {
         case STATE_NOT_CONNECTED:
             if (OK_TO_CONNECT) {
                 STATE_CHANGE(STATE_CONNECTING, "", "", "");
@@ -1658,6 +1719,7 @@ void * webcam_thread(void * cx)
             last_zoom = '-';  // invalid zoom value
             bzero(&wc->mode, sizeof(struct mode_s));
             bzero(&wc->status, sizeof(struct status_s));
+            wc->frame_status = STATUS_INFO_OK;
             STATE_CHANGE(STATE_CONNECTED, "CONNECTED", "", "");
             break; }
 
@@ -1667,7 +1729,7 @@ void * webcam_thread(void * cx)
             uint32_t     data_len, width, height;
             uint8_t      data[RP_MAX_FRAME_DATA_LEN];
             uint8_t    * image;
-            uint64_t     curr_time_us;
+            uint64_t     curr_us;
             char         int_str[MAX_INT_STR];
 
             // if mode has changed then send message to webcam
@@ -1718,7 +1780,7 @@ void * webcam_thread(void * cx)
                 last_zoom = tmp_zoom;
             }
 
-            // process resolution change event
+            // process resolution change request
             if (wc->change_resolution_request) {
                 if (wc->mode.mode == MODE_LIVE) {
                     bzero(&msg,sizeof(msg));
@@ -1734,17 +1796,21 @@ void * webcam_thread(void * cx)
 
             // clear highlight if it is currently enabled and the last time it was
             // enabled is greater than HIGHLIGHT_TIME_US
-            curr_time_us = microsec_timer();
+            curr_us = microsec_timer();
             if ((wc->image_highlight) &&
-                (curr_time_us - last_highlight_enable_time_us > HIGHLIGHT_TIME_US) &&
+                (curr_us - last_highlight_enable_time_us > HIGHLIGHT_TIME_US) &&
                 !(wc->mode.mode == MODE_PLAYBACK && wc->mode.pb_submode == PB_SUBMODE_PAUSE))
             {
                 DISPLAY_CLEAR_HIGHLIGHT();
             }
 
-            // if haven't received a status msg in 10 seconds then display error 
-            if (curr_time_us - last_status_msg_recv_time_us > 10000000) {
+            // if an error condition exists then display the error
+            if (curr_us - last_status_msg_recv_time_us > 10000000) {
                 DISPLAY_TEXT(status2str(STATUS_ERR_DEAD), "", "");
+            } else if (wc->mode.mode == MODE_LIVE && wc->status.cam_status != STATUS_INFO_OK) {
+                DISPLAY_TEXT(status2str(wc->status.cam_status), "", "");
+            } else if (wc->mode.mode == MODE_PLAYBACK && wc->status.rp_status != STATUS_INFO_OK) {
+                DISPLAY_TEXT(status2str(wc->status.rp_status), "", "");
             }
 
             // receive msg header  
@@ -1818,7 +1884,7 @@ void * webcam_thread(void * cx)
                 // if data_len is 0 that means webcam is responding with no image;
                 // such as for a playback time when nothing was recorded
                 if (data_len == 0) {
-//XXX save last_frame_status
+                    wc->frame_status = msg.u.mt_frame.status;
                     DISPLAY_TEXT(status2str(msg.u.mt_frame.status), "", "");
                     break;
                 }
@@ -1829,11 +1895,13 @@ void * webcam_thread(void * cx)
                                   &image, &width, &height);   // pixels
                 if (ret < 0) {
                     ERROR("wc %c: jpeg decode ret=%d\n", id_char, ret);
+                    wc->frame_status = STATUS_ERR_JPEG_DECODE;
                     DISPLAY_TEXT(status2str(STATUS_ERR_JPEG_DECODE), "", "");
                     break;
                 }
 
                 // display the image
+                wc->frame_status = STATUS_INFO_OK;
                 DISPLAY_IMAGE(image, width, height, msg.u.mt_frame.motion);
                 break;
 
@@ -1841,13 +1909,6 @@ void * webcam_thread(void * cx)
                 // save status and last time status recvd
                 wc->status = msg.u.mt_status;
                 last_status_msg_recv_time_us = microsec_timer();
-
-                // if error status for the mode we're in then display text 
-                if (wc->mode.mode == MODE_LIVE && wc->status.cam_status != STATUS_INFO_OK) {
-                    DISPLAY_TEXT(status2str(wc->status.cam_status), "", "");
-                } else if (wc->mode.mode == MODE_PLAYBACK && wc->status.rp_status != STATUS_INFO_OK) {
-                    DISPLAY_TEXT(status2str(wc->status.rp_status), "", "");
-                }
                 break;
 
             default:
@@ -1874,13 +1935,13 @@ void * webcam_thread(void * cx)
         default: {
             char int_str[MAX_INT_STR];
 
-            int2str(int_str, state);
+            int2str(int_str, wc->state);
             STATE_CHANGE(STATE_FATAL_ERROR, "DISABLED", "invalid state", int_str);
             break; }
         }
 
-        // if quit event of in fatal error state then exit this thread
-        if (event.quit_event || state == STATE_FATAL_ERROR) {
+        // if quit event or in fatal error state then exit this thread
+        if (event.quit_event || wc->state == STATE_FATAL_ERROR) {
             break;
         }
     }
@@ -1903,6 +1964,7 @@ void * debug_thread(void * cx)
 
     int    argc;
     char * argv[MAX_GETCL_ARGV];
+    p2p_routines_t * p2p = &p2p1;
 
     // enable this thread to be cancelled
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
@@ -1927,7 +1989,7 @@ void * debug_thread(void * cx)
             continue;
         }
 
-#if 0 // ZZZ
+#if 1 // ZZZ
         // cmd: p2p_debug_con 
         if (strcmp(argv[0], "p2p_debug_con") == 0) {
             int handle;
@@ -1968,7 +2030,7 @@ bool getcl(int * argc, char ** argv)
 {
     char * saveptr;
     char * token;
-    char   b[100];
+    static char b[100];
 
     *argc = 0;
 
@@ -1977,7 +2039,7 @@ bool getcl(int * argc, char ** argv)
     }
 
     while (true) {
-        token = strtok_r(*argc==0?b:NULL, "   \n", &saveptr);
+        token = strtok_r(*argc==0?b:NULL, " \n", &saveptr);
         if (token == NULL) {
             return true;
         }
