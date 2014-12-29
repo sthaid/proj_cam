@@ -6,7 +6,6 @@
 #include <sys/mman.h>
 #include <linux/videodev2.h>
 
-// XXX try /dev/video1, 2....
 // XXX in overnight run it stopped receiving frames, perhaps ...
 //     - in live mode if no frames received by viewer, it can display that
 //     - in playback mode, should there always be frames received
@@ -17,12 +16,21 @@
 //
 
 // tuning
-#define MAX_BUFMAP                32  
-#define FRAMES_PER_SEC            10
-#define FRAME_COMPARE_INTERVAL    5
+#define MAX_BUFMAP             32  
+#define FRAMES_PER_SEC         10
+#define FRAME_COMPARE_INTERVAL 5
 
-// webcam 
+// webcam base device name
 #define WC_VIDEO "/dev/video"
+
+// configuration
+#define CONFIG_PATH         ".wc_config"
+#define CONFIG_VERSION      1
+#define CONFIG_RESOLUTION   (config[0].value[0])
+#define CONFIG_WRITE() \
+    do { \
+        config_write(CONFIG_PATH, config, CONFIG_VERSION); \
+    } while (0)
 
 // cam resolution
 #define MAX_RESOLUTION    3
@@ -36,13 +44,9 @@
                           (((w) == WIDTH_HIGH_RES && (h) == HEIGHT_HIGH_RES) || \
                            ((w) == WIDTH_MED_RES && (h) == HEIGHT_MED_RES)   || \
                            ((w) == WIDTH_LOW_RES && (h) == HEIGHT_LOW_RES))
-#define WIDTH(res)        ((res) == 0 ? WIDTH_LOW_RES  : (res) == 1 ? WIDTH_MED_RES  : WIDTH_HIGH_RES)
-#define HEIGHT(res)       ((res) == 0 ? HEIGHT_LOW_RES : (res) == 1 ? HEIGHT_MED_RES : HEIGHT_HIGH_RES)
+#define WIDTH(res)        ((res) == '0' ? WIDTH_LOW_RES  : (res) == '1' ? WIDTH_MED_RES  : WIDTH_HIGH_RES)
+#define HEIGHT(res)       ((res) == '0' ? HEIGHT_LOW_RES : (res) == '1' ? HEIGHT_MED_RES : HEIGHT_HIGH_RES)
 #define MAX_PIXELS        (WIDTH_HIGH_RES * HEIGHT_HIGH_RES)
-
-// cam settings
-#define MAX_CAM_SETTINGS_INFO   (sizeof(cam_settings_info) / sizeof(cam_settings_info[0]))
-#define CAM_SETTINGS_FILE_NAME  "cam_settings.dat"
 
 // record / playback
 #define RP_FILE_NAME              "rp.dat"
@@ -92,19 +96,6 @@ typedef struct frame_s {
     int32_t              buff_len;
     uint8_t              buff[0];
 } frame_t;
-
-typedef struct {
-    int resolution;
-} cam_settings_t;
-
-// ZZZ could use the config mechanism here
-typedef struct {
-    char    * name;
-    int32_t * value;
-    int32_t   value_min;
-    int32_t   value_max;
-    int32_t   value_default;
-} cam_settings_info_t;
 
 typedef struct {
     uint64_t magic;
@@ -160,11 +151,9 @@ rp_toc_t          rp_toc[RP_MAX_TOC];
 uint32_t          rp_toc_idx_next;
 uint32_t          rp_toc_idx_oldest = -1;
 
-// cam settings
-cam_settings_t      cam_settings;
-cam_settings_info_t cam_settings_info[] = {
-    { "resolution", &cam_settings.resolution, 0, 2, 1 },
-                        };
+// cam config
+config_t          config[] = { { "resolution",  "2" },
+                               { "",            ""  } };
 
 // code execution time measurement
 TIMING_DECLARE(tmg_rp_read_frame_by_real_time_us,10000000);
@@ -184,13 +173,10 @@ void * wc_svc_webcam(void * cx);
 
 // cam support
 int cam_init(void);
-void cam_init_webcam(int resolution);
+void cam_init_webcam(char resolution);
 void * cam_thread(void * cx);
 void compare_gs_image(uint8_t * gs1, uint32_t gs1_w, uint32_t gs1_h, uint8_t * gs2, uint32_t gs2_w, uint32_t gs2_h,
                       bool * motion, bool * brightness);
-int cam_settings_read(void);
-int cam_settings_write(void);
-void cam_setting_change_resolution(void);
 
 // record/playback support
 int rp_init(void);
@@ -216,6 +202,13 @@ int wc_svc_webcam_init(void)
     TAILQ_INIT(&proc_frame_list);
     pthread_mutex_init(&proc_frame_list_mutex, NULL);
     pthread_rwlock_init(&cam_init_webcam_rwlock, NULL);
+
+    // read configuration
+    ret = config_read(CONFIG_PATH, config, CONFIG_VERSION);
+    if (ret < 0) {
+        ERROR("config_read failed, config_path=%s\n", CONFIG_PATH);
+    }
+    INFO("CONFIG_RESOLUTION = '%c'\n", CONFIG_RESOLUTION);
 
     // initialize record/playback
     ret = rp_init();
@@ -311,7 +304,10 @@ void * wc_svc_webcam(void * cx)
             switch (msg.msg_type) {
             case MSG_TYPE_CMD_LIVE_MODE_CHANGE_RES:
                 DEBUG("received MSG_TYPE_CMD_LIVE_MODE_CHANGE_RES\n");
-                cam_setting_change_resolution();
+                CONFIG_RESOLUTION = (CONFIG_RESOLUTION == '0' ? '1' :
+                                     CONFIG_RESOLUTION == '1' ? '2' 
+                                                              : '0');
+                CONFIG_WRITE();
                 break;
 
             case MSG_TYPE_CMD_SET_MODE:
@@ -613,12 +609,6 @@ int cam_init(void)
 {
     pthread_t thread;
 
-    // read webcam settings
-    if (cam_settings_read() < 0) {
-        ERROR("cam_settings_read failed\n");
-        return -1;
-    }
-
     // create cam_thread
     pthread_create(&thread, NULL, cam_thread, NULL);
 
@@ -626,7 +616,7 @@ int cam_init(void)
     return 0;
 }
 
-void cam_init_webcam(int resolution)
+void cam_init_webcam(char resolution)
 {
     struct v4l2_capability     cap;
     struct v4l2_cropcap        cropcap;
@@ -639,7 +629,7 @@ void cam_init_webcam(int resolution)
     int                        i;
     bool                       first_try = true;
 
-    INFO("starting, resolution=%d\n", resolution);
+    INFO("starting, resolution=%c\n", resolution);
 
 try_again:
     // if not first try then delay
@@ -809,7 +799,7 @@ try_again:
 
 void * cam_thread(void * cx)
 {
-    int                curr_resolution = 0;
+    char               curr_resolution = 'N';
     bool               cam_init_needed = true;
 
     struct v4l2_buffer buffer;
@@ -897,8 +887,8 @@ void * cam_thread(void * cx)
     // loop forever
     while (true) {
         // process settings changes
-        if (cam_init_needed || cam_settings.resolution != curr_resolution) {
-            int res = cam_settings.resolution;
+        if (cam_init_needed || CONFIG_RESOLUTION != curr_resolution) {
+            char res = CONFIG_RESOLUTION;
 
             FREE_LOCAL_VARS();
             INIT_LOCAL_VARS();
@@ -1220,94 +1210,6 @@ void compare_gs_image(uint8_t * gs1, uint32_t gs1_w, uint32_t gs1_h, uint8_t * g
                brightness_diff);
     }
 #endif
-}
-
-int cam_settings_read(void)
-{
-    FILE  * fp;
-    int32_t i, value;
-    char    s[100], name[100];
-
-    // init all cam_settings fields to default
-    for (i = 0; i < MAX_CAM_SETTINGS_INFO; i++) {
-        cam_settings_info_t * si = &cam_settings_info[i];
-        *(si->value) = cam_settings_info[i].value_default;
-    }
-
-    // open 
-    fp = fopen(CAM_SETTINGS_FILE_NAME, "re");  // mode: read-only, close-on-exec
-    if (fp == NULL) {
-        goto cam_settings_init;
-    }
-
-    // read
-    while (fgets(s, sizeof(s), fp) != NULL) {
-        if (sscanf(s, "%s %d", name, &value) != 2) {
-            fclose(fp);
-            goto cam_settings_init;
-        }
-
-        for (i = 0; i < MAX_CAM_SETTINGS_INFO; i++) {
-            cam_settings_info_t * si = &cam_settings_info[i];
-            if (strcmp(name, si->name) == 0) {
-                if (value >= si->value_min && value <= si->value_max) {
-                    *(si->value) = value;
-                } else {
-                    *(si->value) = cam_settings_info[i].value_default;
-                }
-                break;
-            }
-        }
-    }
-
-    // close fp
-    fclose(fp);
-    return 0;
-
-cam_settings_init:
-    // an error occurred
-    ERROR("failed to read %s, initializing to default settings\n", CAM_SETTINGS_FILE_NAME);
-
-    // init all cam_settings fields to default
-    for (i = 0; i < MAX_CAM_SETTINGS_INFO; i++) {
-        cam_settings_info_t * si = &cam_settings_info[i];
-        *(si->value) = cam_settings_info[i].value_default;
-    }
-
-    // write settings
-    if (cam_settings_write() < 0) {
-        ERROR("failed to create default settings file\n");
-        return -1;
-    }
-
-    // return success
-    return 0;
-}
-
-int cam_settings_write(void)
-{
-    FILE * fp;
-    int    i;
-
-    fp = fopen(CAM_SETTINGS_FILE_NAME, "we");  // mode: truncate-or-create, close-on-exec
-    if (fp == NULL) {
-        ERROR("failed open %s for writing\n", CAM_SETTINGS_FILE_NAME);
-        return -1;
-    }
-
-    for (i = 0; i < MAX_CAM_SETTINGS_INFO; i++) {
-        cam_settings_info_t * si = &cam_settings_info[i];
-        fprintf(fp, "%s %d\n", si->name, *(si->value));
-    }
-
-    fclose(fp);
-    return 0;
-}
-
-void cam_setting_change_resolution()
-{
-    cam_settings.resolution = (cam_settings.resolution + 1) % MAX_RESOLUTION;
-    cam_settings_write();
 }
 
 // -----------------  RECORD / PLAYBACK -------------------------------------------------
