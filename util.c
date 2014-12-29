@@ -434,7 +434,9 @@ void logmsg(char *lvl, const char *func, char *fmt, ...)
         }
     } else {
         // logging to stderr
-        fprintf(stderr,"%s %s: %s\n", lvl, func, msg);
+        cnt = fprintf(stderr, "%s %s %s: %s\n",
+                      time2str(time_str, time(NULL), false),
+                      lvl, func, msg);
     }
 }
 
