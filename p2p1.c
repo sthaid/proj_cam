@@ -175,7 +175,7 @@ int p2p1_get_stats(int handle, p2p_stats_t * stats);
 int p2p1_monitor_ctl(int handle, int secs);
 void * monitor_thread(void * cx);
 void send_data_dgram_list(con_t * con, uint64_t time_ms, char * debug_str); 
-void process_acks(con_t * con, int * ack, int max, int new_remote_recvbuff_offset);
+void process_acks(con_t * con, int * ack, int max, uint64_t new_remote_recvbuff_offset);
 void send_ack(con_t * con, uint64_t time_ms, char * debug_str);
 void send_stats(con_t * con, uint64_t time_ms);
 int send_dgram(con_t * con, void * dgram, int length);
@@ -1775,7 +1775,7 @@ void send_data_dgram_list(con_t * con, uint64_t time_ms, char * debug_str)
     }
 }
 
-void process_acks(con_t * con, int * ack, int max, int new_remote_recvbuff_offset)
+void process_acks(con_t * con, int * ack, int max, uint64_t new_remote_recvbuff_offset)
 {
     int i, idx, id;
     data_dgram_entry_t * ddge;
@@ -2080,7 +2080,7 @@ void p2p1_debug_con(int handle)
            TAILQ_LENGTH(data_dgram_entry_s, &con->data_dgram_waiting_for_ack_list_head, entries));
     PRINTF("num_data_dgrams_on_waiting_for_ack_list=%d\n",
            con->num_data_dgrams_on_waiting_for_ack_list);
-    PRINTF("recvbuff_data_valid_lst: ...\n");
+    PRINTF("recvbuff_data_valid_list: ...\n");
     TAILQ_FOREACH(dve, &con->recvbuff_data_valid_list_head, entries) {
         PRINTF("    %10"PRId64"  %10"PRId64"\n", 
                dve->offset, dve->length);
