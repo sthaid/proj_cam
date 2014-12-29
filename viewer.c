@@ -5,12 +5,8 @@
 #include <SDL_ttf.h>
 #include <SDL_mixer.h>
 
-// XXX maybe p2p1/2 should use real time threads     IN OTHER FILE
 // XXX use SET_CTL_MODE_PLAYBACK_TIME(delta_us)
-
-// ZZZ review all ifdef ANDROID
 // ZZZ review all struct fields
-// ZZZ search for YYY and ZZZ
 // ZZZ mode locking
 
 //
@@ -47,7 +43,7 @@
 #ifndef ANDROID 
 #define SDL_FLAGS                   SDL_WINDOW_RESIZABLE
 #else
-#define SDL_FLAGS                   SDL_WINDOW_FULLSCREEN_DESKTOP  //ZZZ
+#define SDL_FLAGS                   SDL_WINDOW_FULLSCREEN
 #endif
 
 #define MAX_FONT                    2
@@ -424,7 +420,6 @@ int main(int argc, char **argv)
     TTF_SizeText(font[1].font, "X", &font[1].char_width, &font[1].char_height);
 
 #ifndef ANDROID
-    // ZZZ look throughout to see if I can get rid of debug thread
     // if debug mode enabled then create debug_thread
     pthread_t debug_thread_id = 0;
     if (CONFIG_DEBUG == 'Y') {
@@ -454,7 +449,6 @@ int main(int argc, char **argv)
     }
 
     // wait for up to 3 second for the webcam threads to terminate
-    // ZZZ does this code run on android when the pgm exits
     count = 0;
     while (webcam_threads_running_count != 0 && count++ < 3000/10) {
         usleep(10*MS);
@@ -479,8 +473,7 @@ int main(int argc, char **argv)
 
     // return success
     INFO("program terminating\n");
-    exit(0); 
-    // XXX ??? return 0;
+    return 0;
 }
 
 // -----------------  SERVER_CHECK  --------------------------------------
@@ -1368,6 +1361,7 @@ void display_handler(void)
     // CONFIG  QUIT    
 
     // status display
+    // ZZZ some say "not conn" and others don't
     if ((mode.mode == MODE_LIVE) || (mode.mode == MODE_PLAYBACK)) {
         switch (status_select) {
 
@@ -1389,7 +1383,7 @@ void display_handler(void)
                     if (webcam[i].recvd_frames < last_recvd_frames[i]) {
                         last_recvd_frames[i] = webcam[i].recvd_frames;
                     }
-                    sprintf(static_str[i], "%c %4.1f", 
+                    sprintf(static_str[i], "%c %0.1f", 
                             'A'+i,
                             (double)(webcam[i].recvd_frames - last_recvd_frames[i]) * 1000000 / delta_us);
                     last_recvd_frames[i] = webcam[i].recvd_frames;
@@ -1702,8 +1696,12 @@ void * webcam_thread(void * cx)
                          "");
 
             // attempt to connect to wc_name
+            //ZZZ can this now return a status
+            //     - p2p1 can receive a connect_reject packet, and there are other error paths
+            //     - p2p2 can get error status back from connect_from_cloud_server
+            //     - should use STATUS_T
             h = p2p_connect(CONFIG_USERNAME, CONFIG_PASSWORD, wc->image_name, SERVICE_WEBCAM);
-            if (h < 0) {  //ZZZ can this now return a status
+            if (h < 0) {  
                 STATE_CHANGE(STATE_CONNECTING_ERROR, "CONNECT ERROR", "", "");
                 break;
             }
