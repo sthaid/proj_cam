@@ -457,22 +457,24 @@ int main(int argc, char **argv)
         WARN("webcam threads failed to terminate\n");
     }
 
-#ifndef ANDROID
-    // cancel the debug thread
-    if (debug_thread_id) {
-        pthread_cancel(debug_thread_id);
-        pthread_join(debug_thread_id, NULL);
-    }
-#endif
-
     // cleanup
     Mix_FreeChunk(button_sound);
     Mix_CloseAudio();
     TTF_Quit();
     SDL_Quit();
 
-    // return success
+    // log program termination message
     INFO("program terminating\n");
+
+#ifndef ANDROID
+    // send SIGTERM to this process, this will allow readline to reset the
+    // terminal attributes prior to program termination
+    if (debug_thread_id) {
+        kill(getpid(), SIGTERM);
+    }
+#endif
+
+    // return success
     return 0;
 }
 
@@ -1967,6 +1969,11 @@ void * debug_thread(void * cx)
 
     // enable this thread to be cancelled
     pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+
+    // this allows the program to reset terminal attributes when SIGTERM sent;
+    // it seems to me this code line should not be needed, 
+    // refer to "Readline Signal Handling" on web
+    rl_catch_signals = 0;
 
     // loop until eof on debug input or thread cancelled
     while (true) {
