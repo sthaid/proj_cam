@@ -48,7 +48,7 @@
 // -----------------  VERSION  ------------------------------------------------------
 
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 0
+#define VERSION_MINOR 2
 
 #define VERSION ( { version_t v = { VERSION_MAJOR, VERSION_MINOR }; v; } );
 
