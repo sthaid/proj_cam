@@ -136,7 +136,6 @@ int                      cam_fd = -1;
 bufmap_t                 bufmap[MAX_BUFMAP];
 TAILQ_HEAD(th1, frame_s) proc_frame_list;
 pthread_mutex_t          proc_frame_list_mutex;
-pthread_rwlock_t         cam_init_webcam_rwlock;
 
 // status
 uint32_t cam_status;
@@ -201,7 +200,6 @@ int wc_svc_webcam_init(void)
     // init
     TAILQ_INIT(&proc_frame_list);
     pthread_mutex_init(&proc_frame_list_mutex, NULL);
-    pthread_rwlock_init(&cam_init_webcam_rwlock, NULL);
 
     // read configuration
     ret = config_read(CONFIG_PATH, config, CONFIG_VERSION);
@@ -254,6 +252,17 @@ void * wc_svc_webcam(void * cx)
         ((rp_file_hdr.last_frame_valid_through_real_time_us == 0 || rp_toc_idx_oldest == -1) \
          ? 0  \
          : rp_file_hdr.last_frame_valid_through_real_time_us - rp_toc[rp_toc_idx_oldest].real_time_us)
+
+    #define REMOVE_LIVE_FRAME_REFERENCE() \
+        do { \
+            if (live_frame != NULL) { \
+                pthread_mutex_lock(&proc_frame_list_mutex); \
+                live_frame->ref_count--; \
+                live_frame = NULL; \
+                pthread_mutex_unlock(&proc_frame_list_mutex); \
+            } \
+        } while (0)
+
 
     // common variables
     int           handle                        = (long)cx;
@@ -377,6 +386,7 @@ void * wc_svc_webcam(void * cx)
 
             // if just entered this mode then init
             if (mode_is_new) {
+                REMOVE_LIVE_FRAME_REFERENCE();
                 live_frame                    = NULL;
                 live_last_frame_send_time_us  = 0;
                 mode_is_new                   = false;
@@ -389,16 +399,10 @@ void * wc_svc_webcam(void * cx)
             }
             live_last_frame_send_time_us = curr_us;
 
-            // try to acquire the cam_init_webcam_rwlock, if failed then continue
-            if (pthread_rwlock_tryrdlock(&cam_init_webcam_rwlock) != 0) {
-                continue;
-            }
-
             // attempt to get new live_frame from proc_frame_list, if none then continue;
             pthread_mutex_lock(&proc_frame_list_mutex);
             if (TAILQ_EMPTY(&proc_frame_list) || live_frame == TAILQ_LAST(&proc_frame_list,th1)) {
                 pthread_mutex_unlock(&proc_frame_list_mutex);
-                pthread_rwlock_unlock(&cam_init_webcam_rwlock);
                 continue;
             } else if (live_frame == NULL) {
                 live_frame = TAILQ_LAST(&proc_frame_list,th1);
@@ -412,12 +416,8 @@ void * wc_svc_webcam(void * cx)
 
             // send the frame
             if (SEND_MSG_FRAME(live_frame->buff, live_frame->buff_len, live_frame->motion, 0, STATUS_INFO_OK) < 0) {
-                pthread_rwlock_unlock(&cam_init_webcam_rwlock);
                 goto done;
             }
-
-            // release cam_init_webcam_rwlock
-            pthread_rwlock_unlock(&cam_init_webcam_rwlock);
 
         //
         // MODE_PLAYBACK support 
@@ -430,6 +430,7 @@ void * wc_svc_webcam(void * cx)
             //
 
             if (mode_is_new) {
+                REMOVE_LIVE_FRAME_REFERENCE();
                 stop_frame_sent               = false;
                 pause_frame_sent              = false;
                 pause_frame_read_fail_time_us = 0;
@@ -584,6 +585,7 @@ void * wc_svc_webcam(void * cx)
 
         } else if (mode.mode == MODE_NONE) {
             if (mode_is_new) {
+                REMOVE_LIVE_FRAME_REFERENCE();
                 mode_is_new = false;
             }
 
@@ -598,6 +600,7 @@ void * wc_svc_webcam(void * cx)
     }
 
 done:
+    REMOVE_LIVE_FRAME_REFERENCE();
     p2p_disconnect(handle);
     INFO("terminating\n");
     return NULL;
@@ -893,9 +896,7 @@ void * cam_thread(void * cx)
             FREE_LOCAL_VARS();
             INIT_LOCAL_VARS();
 
-            pthread_rwlock_wrlock(&cam_init_webcam_rwlock);
             cam_init_webcam(res);
-            pthread_rwlock_unlock(&cam_init_webcam_rwlock);
 
             curr_resolution = res;
             cam_init_needed = false;
@@ -1505,11 +1506,6 @@ void * rp_write_file_frame_thread(void * cx)
             }
         }
 
-        // try acquire cam_init_webcam_rwlock
-        if (pthread_rwlock_tryrdlock(&cam_init_webcam_rwlock) != 0) {
-            goto skip;
-        }
-
         // copy up to 10 frames to the file
         for (loop_count = 0; loop_count < 10; loop_count++) {
 
@@ -1546,7 +1542,6 @@ void * rp_write_file_frame_thread(void * cx)
                                  record_frame->motion);
             if (ret < 0) {
                 ERROR("failed to write frame\n");
-                pthread_rwlock_unlock(&cam_init_webcam_rwlock);
                 goto error;
             }
             last_frame_is_gap = false;
@@ -1556,10 +1551,6 @@ void * rp_write_file_frame_thread(void * cx)
             rp_file_hdr.last_frame_valid_through_real_time_us = this_frame_real_time_us;
         }
 
-        // release cam_init_webcam_rwlock
-        pthread_rwlock_unlock(&cam_init_webcam_rwlock);
-
-skip:
         // every 10 seconds sync data to disk and update the file hdr on disk 
         if (microsec_timer() - last_file_hdr_write_time_us > 10000000) {
             ret = rp_write_file_hdr();
