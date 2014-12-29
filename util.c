@@ -680,7 +680,6 @@ void real_time_init(void)
     sntp_query(true);
 }
 
-// XXX priority
 static void sntp_query(bool aggressive)
 {
     #define MAX_SERVER_LIST     (sizeof(server_name_list)/sizeof(char*))
