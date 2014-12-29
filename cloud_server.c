@@ -1444,6 +1444,7 @@ void * dgram_thread(void * cx)
             int idx=-1, i;
             char s1[100], s2[100];
             struct sockaddr_in * wc_addr = &from_addr;
+            bool just_gone_online = false;
 
             // verify wc_macaddr
             if (verify_wc_macaddr(dgram_rcv.u.wc_announce.wc_macaddr) == false) {
@@ -1459,7 +1460,7 @@ void * dgram_thread(void * cx)
                 }
             }
 
-            // if announce.wc_macaddr is not in onl_wc tbl then add it
+            // if not found in the onl_wc tbl then pick an empty slot
             if (idx == -1) {
                 for (i = 0; i < MAX_ONL_WC; i++) {
                     if (onl_wc[i].wc_macaddr[0] == '\0') {
@@ -1473,41 +1474,44 @@ void * dgram_thread(void * cx)
                     break;
                 }
 
-                onl_wc[idx].version = dgram_rcv.u.wc_announce.version;
-                strcpy(onl_wc[idx].wc_macaddr, dgram_rcv.u.wc_announce.wc_macaddr);
-                onl_wc[idx].wc_addr = *wc_addr;
-                onl_wc[idx].wc_addr_behind_nat = dgram_rcv.u.wc_announce.wc_addr_behind_nat;
-                onl_wc[idx].last_announce_rcv_time_us = microsec_timer();
-
                 if (idx >= max_onl_wc) {
                     max_onl_wc = idx + 1;
                 }
 
-                INFO("wc %s is now online, %s/%s\n",
-                       onl_wc[idx].wc_macaddr,
-                       sock_addr_to_str(s1,sizeof(s1),(struct sockaddr*)&onl_wc[idx].wc_addr),
-                       sock_addr_to_str(s2,sizeof(s2),(struct sockaddr*)&onl_wc[idx].wc_addr_behind_nat));
-                break;
+                just_gone_online = true;
             }
 
-            // save time of this announce dgram being received
+            // construct a new entry for onl_wc;
+            // note - at this point the last_announce_rcv_time_us field is left unchanged
+            //        to support the memcmp below; the last_announce_rcv_time_us field is
+            //        subsequently updated to the current time
+            onl_wc_t x;
+            bzero(&x, sizeof(x));
+            x.version = dgram_rcv.u.wc_announce.version;
+            strcpy(x.wc_macaddr, dgram_rcv.u.wc_announce.wc_macaddr);
+            x.wc_addr = *wc_addr;
+            x.wc_addr_behind_nat = dgram_rcv.u.wc_announce.wc_addr_behind_nat;
+            x.last_announce_rcv_time_us = onl_wc[idx].last_announce_rcv_time_us; 
+
+            // if the new info is different from what was there before then 
+            // - issue notice 
+            // - publish new info
+            // endif
+            if (memcmp(&x, &onl_wc[idx], sizeof(onl_wc_t)) != 0) {
+                // issue notice
+                INFO("wc %s v%d.%d %s, %s/%s\n",
+                     x.wc_macaddr,
+                     x.version.major, x.version.minor,
+                     just_gone_online ? "is now online" : "update",
+                     sock_addr_to_str(s1,sizeof(s1),(struct sockaddr*)&x.wc_addr),
+                     sock_addr_to_str(s2,sizeof(s2),(struct sockaddr*)&x.wc_addr_behind_nat));
+
+                // publish new entry
+                onl_wc[idx] = x;
+            }
+
+            // update the last_announce_rcv_time_us to the current time
             onl_wc[idx].last_announce_rcv_time_us = microsec_timer();
-
-            // if wc address has changed then update the address info
-            if (memcmp(wc_addr, 
-                       &onl_wc[idx].wc_addr, 
-                       sizeof(struct sockaddr_in)) ||
-                memcmp(&dgram_rcv.u.wc_announce.wc_addr_behind_nat,
-                       &onl_wc[idx].wc_addr_behind_nat,
-                       sizeof(struct sockaddr_in)))
-            {
-                onl_wc[idx].wc_addr = *wc_addr;
-                onl_wc[idx].wc_addr_behind_nat = dgram_rcv.u.wc_announce.wc_addr_behind_nat;
-                INFO("wc %s has new address, %s/%s\n",
-                       onl_wc[idx].wc_macaddr,
-                       sock_addr_to_str(s1,sizeof(s1),(struct sockaddr*)&onl_wc[idx].wc_addr),
-                       sock_addr_to_str(s2,sizeof(s2),(struct sockaddr*)&onl_wc[idx].wc_addr_behind_nat));
-            }
         } while (0);
 
         // if dgram is CONNECT_REQ (from a client) then
@@ -1519,6 +1523,8 @@ void * dgram_thread(void * cx)
             struct sockaddr_in * client_addr = &from_addr;
             user_t             * u;
             char                 s1[100], s2[100];
+
+            // XXX seeing a lot of prints here when attempting to connect to a wc not online
 
             // debug print the connect request
             INFO("recvd connect request from %s/%s user=%s wc_name=%s service=%s\n",
