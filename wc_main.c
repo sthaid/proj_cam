@@ -126,11 +126,11 @@ int main(int argc, char **argv)
 
     // loop forever
     while (true) {
-        // accept a connection         
+        // accept a connection
         handle = p2p_accept(wc_macaddr, &service, user_name);
         if (handle < 0) {
             ERROR("p2p_accept failed\n");
-            sleep(10);
+            sleep(1);
             continue;
         }
 

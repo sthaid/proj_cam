@@ -77,7 +77,7 @@ int config_write(char * config_path, config_t * config, int config_version)
 
 // -----------------  CONNECT_TO_CLOUD_SERVER   --------------------------
 
-int connect_to_cloud_server(char * user_name, char * password, char * service, bool * access_denied)
+int connect_to_cloud_server(char * user_name, char * password, char * service, int * connect_status)
 {
     struct sockaddr_in addr;
     char               login[3*32];
@@ -86,13 +86,14 @@ int connect_to_cloud_server(char * user_name, char * password, char * service, b
     char               s[100];
     char               http_connect_resp[sizeof(HTTP_CONNECT_RESP)];
 
-    // preset return access_denied
-    *access_denied = false;
+    // preset returned status
+    *connect_status = STATUS_ERR_GENERAL_FAILURE;
 
     // get address of CLOUD_SERVER
     ret =  getsockaddr(CLOUD_SERVER_HOSTNAME, CLOUD_SERVER_PORT, SOCK_STREAM, 0, &addr); 
     if (ret < 0) {
         ERROR("failed to get address of %s\n", CLOUD_SERVER_HOSTNAME);
+        *connect_status = STATUS_ERR_GET_SERVER_ADDR;
         return -1;
     }
     INFO("address of %s is %s\n",
@@ -102,6 +103,7 @@ int connect_to_cloud_server(char * user_name, char * password, char * service, b
     sfd = socket(AF_INET, SOCK_STREAM|SOCK_CLOEXEC, 0);
     if (sfd == -1) { 
         ERROR("socket, %s\n", strerror(errno));
+        *connect_status = STATUS_ERR_CREATE_SOCKET;
         return -1;
     } 
 
@@ -110,6 +112,7 @@ int connect_to_cloud_server(char * user_name, char * password, char * service, b
     if (ret == -1) {
         ERROR("connect, %s\n", strerror(errno));
         close(sfd);
+        *connect_status = STATUS_ERR_SERVER_CONNECT;
         return -1;
     }
 
@@ -118,6 +121,7 @@ int connect_to_cloud_server(char * user_name, char * password, char * service, b
     if (len != sizeof(HTTP_CONNECT_REQ)-1) {
         ERROR("sending http connect request, %s\n", strerror(errno));
         close(sfd);
+        *connect_status = STATUS_ERR_SERVER_CONNECT;
         return -1;
     }
 
@@ -127,11 +131,13 @@ int connect_to_cloud_server(char * user_name, char * password, char * service, b
     if (len != sizeof(http_connect_resp)-1) {
         ERROR("reading http connect response, %s\n", strerror(errno));
         close(sfd);
+        *connect_status = STATUS_ERR_SERVER_CONNECT;
         return -1;
     }
     if (strcmp(http_connect_resp, HTTP_CONNECT_RESP) != 0) {
         ERROR("invalid http connect response, '%s'\n", http_connect_resp);
         close(sfd);
+        *connect_status = STATUS_ERR_SERVER_CONNECT;
         return -1;
     }
 
@@ -144,6 +150,7 @@ int connect_to_cloud_server(char * user_name, char * password, char * service, b
     if (len != sizeof(login)) {
         ERROR("sending login request to cloud server, %s\n", strerror(errno));
         close(sfd);
+        *connect_status = STATUS_ERR_SERVER_CONNECT;
         return -1;
     }
 
@@ -152,6 +159,7 @@ int connect_to_cloud_server(char * user_name, char * password, char * service, b
     if (len != sizeof(login_response)) {
         ERROR("reading login response from cloud server, %s\n", strerror(errno));
         close(sfd);
+        *connect_status = STATUS_ERR_SERVER_CONNECT;
         return -1;
     }
 
@@ -160,13 +168,16 @@ int connect_to_cloud_server(char * user_name, char * password, char * service, b
         bzero(login_err_str,sizeof(login_err_str));
         memcpy(login_err_str, &login_response, 4);
         read(sfd,login_err_str+4,sizeof(login_err_str)-5);
-        ERROR("login failed: %s\n", login_err_str);
+        if (sscanf(login_err_str, "status=%d", connect_status) != 1) {
+            *connect_status = STATUS_ERR_INVALID_LOGIN_RESPONSE;
+        }
+        ERROR("login failed, %s, %s\n", login_err_str, status2str(*connect_status));
         close(sfd);
-        *access_denied = true;
         return -1;
     }
 
     // return sfd
+    *connect_status = STATUS_INFO_OK;
     return sfd;
 }
 // -----------------  SOCKET UTILS  ---------------------------------------
@@ -881,6 +892,38 @@ uint64_t fs_avail_bytes(char * path)
     return free_bytes;
 }
 #endif
+
+// -----------------  DGRAM UID UTILS  ------------------------------------
+
+dgram_uid_t dgram_uid_gen(void)
+{
+    dgram_uid_t            dgram_uid;
+    struct timespec        monotonic_ts;
+    
+    static struct timespec realtime_ts;
+
+    // on first call save the realtime_ts
+    if (realtime_ts.tv_sec == 0) {
+        clock_gettime(CLOCK_REALTIME,&realtime_ts);
+    }
+
+    // every call, get the monotonic_ts
+    clock_gettime(CLOCK_MONOTONIC, &monotonic_ts);
+
+    // construct the dgram_uid_t from the realtime_ts, and monotonic_ts
+    dgram_uid.v[0] = realtime_ts.tv_sec;
+    dgram_uid.v[1] = realtime_ts.tv_nsec;
+    dgram_uid.v[2] = monotonic_ts.tv_sec;
+    dgram_uid.v[3] = monotonic_ts.tv_nsec;
+
+    // return the dgram_uid
+    return dgram_uid;
+}
+
+bool dgram_uid_equal(dgram_uid_t * x, dgram_uid_t * y)
+{
+    return memcmp(x, y, sizeof(dgram_uid_t)) == 0;
+}
 
 // -----------------  MISC UTILS  -----------------------------------------
 

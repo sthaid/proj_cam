@@ -1699,7 +1699,7 @@ int rp_read_frame_by_file_offset(uint64_t frame_file_offset, rp_frame_hdr_t * rp
     int      ret;
 
     // preset returns
-    *status = STATUS_ERR_NOT_OK;
+    *status = STATUS_ERR_GENERAL_FAILURE;
     if (data != NULL) {
         *data = NULL;
     }
@@ -1775,7 +1775,7 @@ int rp_read_frame_by_real_time_us(uint64_t real_time_us, rp_frame_hdr_t * rpfh, 
     TIMING_BEGIN(&tmg_rp_read_frame_by_real_time_us_lookup);
 
     // init
-    *status = STATUS_ERR_NOT_OK;
+    *status = STATUS_ERR_GENERAL_FAILURE;
     *frame_start_real_time_us = 0;
     *frame_end_real_time_us = 0;
     start_us = 0;

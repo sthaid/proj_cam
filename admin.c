@@ -26,7 +26,7 @@ int main(int argc, char **argv)
     int             sfd;
     struct rlimit   rl;
     char            opt_char;
-    bool            access_denied;
+    int             connect_status;
     bool            create_account = false;
 
     // set stdout to unbuffered
@@ -82,10 +82,10 @@ int main(int argc, char **argv)
     sfd = connect_to_cloud_server(user_name, 
                                   password, 
                                   create_account ? "create" : "login",
-                                  &access_denied);
+                                  &connect_status);
     if (sfd == -1) {
-        FATAL("unable to connect to server - %s\n",
-              access_denied ? "access denied" : "host unreachable");
+        PRINTF("connect to server failed, %s\n", status2str(connect_status));
+        return 1;
     }
 
     // create thread to copy output from server to stdout

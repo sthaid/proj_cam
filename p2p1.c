@@ -161,9 +161,9 @@ pthread_mutex_t mutex[MAX_CON];
 // prototypes
 //
 
-int p2p1_connect(char * user_name, char * password, char * wc_name, int service);
+int p2p1_connect(char * user_name, char * password, char * wc_name, int service, int * connect_status);
 int p2p1_accept(char * wc_macaddr, int * service, char * user_name);
-int connect_common(int sfd, struct sockaddr_in * peer_addr, uint64_t con_id);
+int connect_common(int sfd, struct sockaddr_in * peer_addr, uint64_t con_id, int * status);
 int p2p1_disconnect(int handle);
 void free_con(int con_tbl_idx);
 int p2p1_send(int handle, void * buff, int len);
@@ -202,12 +202,13 @@ p2p_routines_t p2p1 = { p2p1_connect,
 
 // -----------------  P2P_CONNECT & P2P_ACCEPT  ------------------------
 
-int p2p1_connect(char * user_name, char * password, char * wc_name, int service)
+int p2p1_connect(char * user_name, char * password, char * wc_name, int service, int * connect_status)
 {
     struct sockaddr_in cloud_server_addr;
     struct sockaddr_in local_addr;
     dgram_t            dgram;
-    int                ret, i, sfd, handle;
+    int                sfd = -1;
+    int                ret, i, handle;
     struct sockaddr_in peer_addr;
     uint64_t           con_id;
     char               s[100];
@@ -215,12 +216,19 @@ int p2p1_connect(char * user_name, char * password, char * wc_name, int service)
     socklen_t          fromlen;
     struct sockaddr_in from;
     bool               got_p2p_info = false;
+    dgram_uid_t        dgram_uid;
+    bool               valid_dgram_recvd;
+    uint64_t           start_us;
+
+    // preset connect_status return 
+    *connect_status = STATUS_ERR_GENERAL_FAILURE;
 
     // get address of CLOUD_SERVER
     ret =  getsockaddr(CLOUD_SERVER_HOSTNAME, CLOUD_SERVER_DGRAM_PORT, SOCK_DGRAM, IPPROTO_UDP, &cloud_server_addr);
     if (ret < 0) {
         ERROR("failed to get address of %s\n",  CLOUD_SERVER_HOSTNAME);
-        return -1;
+        *connect_status = STATUS_ERR_GET_SERVER_ADDR;
+        goto error_ret;
     }
     INFO("address of %s is %s\n",
          CLOUD_SERVER_HOSTNAME, 
@@ -230,26 +238,30 @@ int p2p1_connect(char * user_name, char * password, char * wc_name, int service)
     sfd = socket(AF_INET, SOCK_DGRAM|SOCK_CLOEXEC, IPPROTO_UDP);
     if (sfd == -1) {
         ERROR("socket\n");
-        return -1;
+        *connect_status = STATUS_ERR_CREATE_SOCKET;
+        goto error_ret;
     }
 
-    // bind  
+    // bind  XXX still wonder why I need get_local_addr, just use INADDR_ANY instead
     ret = get_local_addr(&local_addr);
     if (ret == -1) {
         ERROR("get_local_addr %s\n", strerror(errno));
-        close(sfd);
-        return -1;
+        *connect_status = STATUS_ERR_GET_LOCAL_ADDR;
+        goto error_ret;
     }
     ret = bind(sfd, (struct sockaddr*)&local_addr, sizeof(local_addr));
     if (ret == -1) {
         ERROR("bind %s\n", strerror(errno));
-        close(sfd);
-        return -1;
+        *connect_status = STATUS_ERR_BIND_LOCAL_ADDR;
+        goto error_ret;
     }
 
-    // try for up to 5 seconds to receive the peer to peer info from cloud_server
+    // repeat tries to receive the peer to peer info from cloud_server
     // that is needed to establish the connection to the webcam
-    for (i = 0; i < 10; i++) {
+    for (i = 0; i < 5; i++) {
+        // generate the dgram_uid, which is used to validate the response 
+        dgram_uid = dgram_uid_gen();          
+
         // construct connect request dgram
         bzero(&dgram,sizeof(dgram));
         dgram.id = DGRAM_ID_CONNECT_REQ;
@@ -260,9 +272,10 @@ int p2p1_connect(char * user_name, char * password, char * wc_name, int service)
         ret = getsockname(sfd, (struct sockaddr *)&dgram.u.connect_req.client_addr_behind_nat, &addrlen);
         if (ret == -1) {
             ERROR("getsockname");
-            close(sfd);
-            return -1;
+            *connect_status = STATUS_ERR_GETSOCKNAME;
+            goto error_ret;
         }
+        dgram.u.connect_req.dgram_uid = dgram_uid;
 
         // debug print the dgram we are about to send
         DEBUG_PRINT_DGRAM(false, &dgram, offsetof(dgram_t,u.connect_req.dgram_end));
@@ -272,40 +285,81 @@ int p2p1_connect(char * user_name, char * password, char * wc_name, int service)
                      (struct sockaddr *)&cloud_server_addr, sizeof(cloud_server_addr));
         if (ret != offsetof(dgram_t,u.connect_req.dgram_end)) {
             ERROR("send connect");
-            close(sfd);
-            return -1;
+            *connect_status = STATUS_ERR_SENDTO;
+            goto error_ret;
         }
 
-        // recv dgram with 500 msec tout
-        set_sock_opts(sfd, -1, -1, -1, 500000);
-        fromlen = sizeof(from);
-        ret = recvfrom(sfd, &dgram, sizeof(dgram_t), 0, (struct sockaddr*)&from, &fromlen);
-        set_sock_opts(sfd, -1, -1, -1, 0);
-        if (ret < 0 && errno == EAGAIN) {
+        // receive the response, give up after 2 seconds
+        valid_dgram_recvd = false;
+        start_us = microsec_timer();
+        while (true) {
+            // if times up then break
+            if (microsec_timer() - start_us > 2000000) {
+                break;
+            }
+
+            // recv dgram with 1 sec tout
+            set_sock_opts(sfd, -1, -1, -1, 1000000);
+            fromlen = sizeof(from);
+            ret = recvfrom(sfd, &dgram, sizeof(dgram_t), 0, (struct sockaddr*)&from, &fromlen);
+            set_sock_opts(sfd, -1, -1, -1, 0);
+            if (ret < 0 && errno == EAGAIN) {
+                continue;
+            }
+            if (ret < 0) {
+                ERROR("recv return error %s\n", strerror(errno));
+                *connect_status = STATUS_ERR_RECVFROM;
+                goto error_ret;
+            }
+
+            // debug print the received dgram
+            DEBUG_PRINT_DGRAM(true, &dgram, ret);
+
+            // if dgram is not from server then receive again
+            if (fromlen != sizeof(struct sockaddr_in) ||
+                memcmp(&cloud_server_addr, &from, sizeof(from)) != 0) 
+            {
+                ERROR("ignoring dgram - from unexpected address\n");
+                continue;
+            }
+
+            // if the dgram is not valid then receive again
+            if (!verify_recvd_dgram(&dgram,ret,DGRAM_ID_CONNECT_ACTIVATE,DGRAM_ID_CONNECT_REJECT,0,0,0,0,s,sizeof(s))) {
+                ERROR("ignoring dgram - verify_recvd_dgram: %s\n", s);
+                continue;
+            }
+
+            // if the recvd dgram_uid doesn't match what was sent then receive again
+            if ((dgram.id == DGRAM_ID_CONNECT_ACTIVATE && 
+                 dgram_uid_equal(&dgram.u.connect_activate.dgram_uid, &dgram_uid) == false) ||
+                (dgram.id == DGRAM_ID_CONNECT_REJECT && 
+                 dgram_uid_equal(&dgram.u.connect_reject.dgram_uid, &dgram_uid) == false))
+            {
+                ERROR("ignoring dgram - dgram_uid doesn't match what was sent\n");
+                continue;
+            }
+
+            // the recvd dgram is valid, so break out of this loop
+            valid_dgram_recvd = true;
+            break;
+        }
+
+        // if we haven't received a response then send the request again
+        if (!valid_dgram_recvd) {
+            ERROR("did not recive a valid dgram response, try send CONNECT_REQ again\n");
             continue;
         }
-        if (ret < 0) {
-            ERROR("recv return error %s\n", strerror(errno));
-            close(sfd);
-            return -1;
-        }
 
-        // debug print the received dgram
-        DEBUG_PRINT_DGRAM(true, &dgram, ret);
-
-        // verify dgram is from server
-        if (fromlen != sizeof(struct sockaddr_in) ||
-            memcmp(&cloud_server_addr, &from, sizeof(from)) != 0) 
-        {
-            DEBUG("ignoring dgram from unexpected address\n");
-            continue;
-        }
-
-        // verify the received dgram 
-        if (!verify_recvd_dgram(&dgram,ret,DGRAM_ID_CONNECT_ACTIVATE,0,0,0,0,0,s,sizeof(s))) {
-            ERROR("verify_recvd_dgram: %s\n", s);
-            close(sfd);
-            return -1;
+        // if response is rejection then return errror
+        if (dgram.id == DGRAM_ID_CONNECT_REJECT) {
+            if (dgram.u.connect_reject.status == STATUS_ERR_WC_ADDR_NOT_AVAIL) {
+                INFO("recvd dgram rejection, status WC_ADDR_NOT_AVAIL, retrying in 1 sec\n");
+                sleep(1);
+                continue;
+            }
+            ERROR("recvd dgram rejection, status %s\n", status2str(dgram.u.connect_reject.status));
+            *connect_status = dgram.u.connect_reject.status;
+            goto error_ret;
         }
 
         // we got the needed peer_addr and con_id
@@ -318,37 +372,64 @@ int p2p1_connect(char * user_name, char * password, char * wc_name, int service)
     // if we did not get the info then error
     if (!got_p2p_info) {
         ERROR("failed to receive p2p connect info from server\n");
-        close(sfd);
-        return -1;
+        *connect_status = STATUS_ERR_NO_RESPONSE_FROM_SERVER;
+        goto error_ret;
     }
 
     // call connect common;  on error sfd is closed by connect_common
-    handle = connect_common(sfd, &peer_addr, con_id);
+    handle = connect_common(sfd, &peer_addr, con_id, connect_status);
     if (handle < 0) {
         ERROR("%"PRId64" connect_common failed\n", con_id);
-        return -1;
+        sfd = -1;
+        goto error_ret;
     }
 
     // return handle
+    *connect_status = STATUS_INFO_OK;
     return handle;
+
+    // error return path
+error_ret:
+    if (sfd != -1) {
+        close(sfd);
+        sfd = -1;
+    }
+    return -1;
 }
 
 int p2p1_accept(char * wc_macaddr, int * service, char * user_name)
 {
+    #define MAX_DGRAM_UID_TBL 30
+
     struct sockaddr_in   local_addr;
     struct sockaddr_in   cloud_server_addr;
     struct sockaddr_in   new_cloud_server_addr;
-    int                  ret, sfd, handle;
+    int                  sfd = -1;
+    int                  ret, handle, status, i;
     dgram_t              dgram;
     struct sockaddr_in   peer_addr;
     uint64_t             con_id;
     char                 s[100];
     socklen_t            addrlen = sizeof(struct sockaddr_in);
-    int                  send_announce_count = 0;
-    int                  recv_tout_us;
     socklen_t            fromlen;
     struct sockaddr_in   from;
     uint64_t             time_last_getsockaddr_ms;
+    bool                 connect_activate_dgram_recvd;
+    uint64_t             start_us;
+    bool                 retry = false;
+
+    static dgram_uid_t   dgram_uid_tbl[MAX_DGRAM_UID_TBL];
+
+try_again:
+    // close the socket and delay one second when retrying
+    if (sfd != -1) {
+        close(sfd);
+        sfd = -1;
+    }
+    if (retry) {
+        sleep(1);
+    }
+    retry = true;
 
     // preset returns
     *service = SERVICE_INVALID;
@@ -358,34 +439,35 @@ int p2p1_accept(char * wc_macaddr, int * service, char * user_name)
     sfd = socket(AF_INET, SOCK_DGRAM|SOCK_CLOEXEC, IPPROTO_UDP);
     if (sfd == -1) {
         ERROR("socket %s\n", strerror(errno));
-        return -1;
+        goto try_again;
     }
 
     // bind to local_addr  
     ret = get_local_addr(&local_addr);
     if (ret == -1) {
         ERROR("get_local_addr %s\n", strerror(errno));
-        close(sfd);
-        return -1;
+        goto try_again;
     }
     ret = bind(sfd, (struct sockaddr*)&local_addr, sizeof(local_addr));
     if (ret == -1) {
         ERROR("bind %s\n", strerror(errno));
-        close(sfd);
-        return -1;
+        goto try_again;
     }
 
     // get address of CLOUD_SERVER_HOSTNAME
-    ret = getsockaddr(CLOUD_SERVER_HOSTNAME, CLOUD_SERVER_DGRAM_PORT, SOCK_DGRAM, IPPROTO_UDP, &cloud_server_addr);
-    if (ret < 0) {
-        ERROR("failed to get address of %s, retry in 1 minute\n", CLOUD_SERVER_HOSTNAME);
-        close(sfd);
-        return -1;
+    while (true) {
+        ret = getsockaddr(CLOUD_SERVER_HOSTNAME, CLOUD_SERVER_DGRAM_PORT, SOCK_DGRAM, IPPROTO_UDP, &cloud_server_addr);
+        if (ret < 0) {
+            ERROR("failed to get address of %s, retry in 10 secs\n", CLOUD_SERVER_HOSTNAME);
+            sleep(10);
+            continue;
+        }
+        time_last_getsockaddr_ms = MILLISEC_TIMER;
+        INFO("address of %s is %s\n", 
+            CLOUD_SERVER_HOSTNAME, 
+            sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&cloud_server_addr));
+        break;
     }
-    time_last_getsockaddr_ms = MILLISEC_TIMER;
-    INFO("address of %s is %s\n", 
-         CLOUD_SERVER_HOSTNAME, 
-         sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&cloud_server_addr));
 
     // loop until we get a peer_addr and conn_id from cloud_server
     while (true) {
@@ -408,8 +490,7 @@ int p2p1_accept(char * wc_macaddr, int * service, char * user_name)
         ret = getsockname(sfd, (struct sockaddr *)&dgram.u.wc_announce.wc_addr_behind_nat, &addrlen);
         if (ret == -1) {
             ERROR("getsockname\n");
-            close(sfd);
-            return -1;
+            goto try_again;
         }
         dgram.u.wc_announce.version = VERSION;
 
@@ -423,45 +504,74 @@ int p2p1_accept(char * wc_macaddr, int * service, char * user_name)
             ERROR("send announce to %s, %s\n", 
                   sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&cloud_server_addr), 
                   strerror(errno));
-            close(sfd);
-            return -1;
+            goto try_again;
         }
-        send_announce_count++;
 
-        // receive on the socket with timeout, 
-        // use short timeout initially to ensure the server receives a new
-        //   announce quickly,
-        // if tout occurred then continue
-        recv_tout_us = (send_announce_count >= 5 ? P2P_ANNOUNCE_INTVL_US : 1000000);
-        set_sock_opts(sfd, -1, -1, -1, recv_tout_us);
-        fromlen = sizeof(from);
-        ret = recvfrom(sfd, &dgram, sizeof(dgram_t) , 0, (struct sockaddr *)&from, &fromlen);
-        set_sock_opts(sfd, -1, -1, -1, 0);
-        if (ret < 0 && errno == EAGAIN) {
+        // receive the response, give up after P2P_ANNOUNCE_INTVL, 
+        // so that another ANNOUNCE will be sent
+        connect_activate_dgram_recvd = false;
+        start_us = microsec_timer();
+        while (true) {
+            // if it has been more than P2P_ANNOUNCE_INTVL_US then break out of this 
+            // loop so that another ANNOUNCE will be sent
+            if (microsec_timer() - start_us > P2P_ANNOUNCE_INTVL_US) {
+                break;
+            }
+
+            // receive on the socket with 1 sec timeout, 
+            set_sock_opts(sfd, -1, -1, -1, 1000000);
+            fromlen = sizeof(from);
+            ret = recvfrom(sfd, &dgram, sizeof(dgram_t) , 0, (struct sockaddr *)&from, &fromlen);
+            set_sock_opts(sfd, -1, -1, -1, 0);
+            if (ret < 0 && errno == EAGAIN) {
+                continue;
+            }
+            if (ret < 0) {
+                ERROR("recvfrom\n");
+                goto try_again;
+            }
+
+            // debug print the received dgram
+            DEBUG_PRINT_DGRAM(true, &dgram, ret);
+
+            // if dgram is not from server then receive again
+            if (fromlen != sizeof(struct sockaddr_in) ||
+                memcmp(&cloud_server_addr, &from, sizeof(from)) != 0) 
+            {
+                ERROR("ignoring dgram - from unexpected address\n");
+                continue;
+            }
+
+            // if the dgram is not valid then receive again
+            if (!verify_recvd_dgram(&dgram,ret,DGRAM_ID_CONNECT_ACTIVATE,0,0,0,0,0,s,sizeof(s))) {
+                ERROR("ignoring dgram - verify_recvd_dgram: %s\n", s);
+                continue;
+            }
+
+            // if this dgram_uid has been received before then receive again
+            for (i = 0; i < MAX_DGRAM_UID_TBL; i++) {
+                if (dgram_uid_equal(&dgram.u.connect_activate.dgram_uid, &dgram_uid_tbl[i])) {
+                    break;
+                }
+            }
+            if (i < MAX_DGRAM_UID_TBL) {
+                ERROR("ignoring dgram - dgram_uid has been recvd before\n");
+                continue;
+            }
+
+            // add the recvd dgram_uid to the dgram_uid_tbl
+            memmove(dgram_uid_tbl+1, dgram_uid_tbl, sizeof(dgram_uid_t)*(MAX_DGRAM_UID_TBL-1));
+            dgram_uid_tbl[0] = dgram.u.connect_activate.dgram_uid;
+
+            // the recvd dgram is valid, so break out of this loop
+            connect_activate_dgram_recvd = true;
+            break;
+        }
+
+        // if we haven't received a CONNECT_ACTIVATE then send the ANNOUNCE again
+        if (!connect_activate_dgram_recvd) {
+            DEBUG("did not recive a valid dgram response, try send ANNOUNCE again\n");
             continue;
-        }
-        if (ret < 0) {
-            ERROR("recvfrom\n");
-            close(sfd);
-            return -1;
-        }
-
-        // debug print the received dgram
-        DEBUG_PRINT_DGRAM(true, &dgram, ret);
-
-        // verify dgram is from server
-        if (fromlen != sizeof(struct sockaddr_in) ||
-            memcmp(&cloud_server_addr, &from, sizeof(from)) != 0) 
-        {
-            DEBUG("ignoring dgram from unexpected address\n");
-            continue;
-        }
-
-        // verify the received dgram
-        if (!verify_recvd_dgram(&dgram,ret,DGRAM_ID_CONNECT_ACTIVATE,0,0,0,0,0,s,sizeof(s))) {
-            ERROR("verify_recvd_dgram: %s\n", s);
-            close(sfd);
-            return -1;
         }
 
         // return the user_name and service to caller
@@ -476,17 +586,18 @@ int p2p1_accept(char * wc_macaddr, int * service, char * user_name)
     }
 
     // call connect common;  on error sfd is closed by connect_common
-    handle = connect_common(sfd, &peer_addr, con_id);
+    handle = connect_common(sfd, &peer_addr, con_id, &status);
     if (handle < 0) {
-        ERROR("%"PRId64" connect_common failed\n", con_id);
-        return -1;
+        ERROR("%"PRId64" connect_common failed, %s\n", con_id, status2str(status));
+        sfd = -1;
+        goto try_again;
     }
 
     // return handle
     return handle;
 }
 
-int connect_common(int sfd, struct sockaddr_in * peer_addr, uint64_t con_id)
+int connect_common(int sfd, struct sockaddr_in * peer_addr, uint64_t con_id, int * status)
 {
     char                          s[100];
     dgram_t                       dgram;
@@ -507,6 +618,7 @@ int connect_common(int sfd, struct sockaddr_in * peer_addr, uint64_t con_id)
     // verify con_id is not zero
     if (con_id == 0) {
         ERROR("%"PRId64" invalid con_id\n", con->con_id);
+        *status = STATUS_ERR_INVALID_CONNECTION_ID;
         goto error_ret;
     }
 
@@ -528,6 +640,7 @@ int connect_common(int sfd, struct sockaddr_in * peer_addr, uint64_t con_id)
     for (i = 0; i < MAX_CON; i++) {
         if (con_tbl[i] && con_tbl[i]->con_id == con_id) {
             ERROR("%"PRId64" con_id is already in use\n", con_id);
+            *status = STATUS_ERR_DUPLICATE_CONNECTION_ID;
             goto error_ret;
         }
     }
@@ -540,6 +653,7 @@ int connect_common(int sfd, struct sockaddr_in * peer_addr, uint64_t con_id)
     }
     if (con_tbl_idx == MAX_CON) {
         ERROR("%"PRId64" con_tbl has no free slot for new connection\n", con_id);
+        *status = STATUS_ERR_TOO_MANY_CONNECTIONS;
         goto error_ret;
     }
 
@@ -547,6 +661,7 @@ int connect_common(int sfd, struct sockaddr_in * peer_addr, uint64_t con_id)
     con = con_tbl[con_tbl_idx] = calloc(1,sizeof(con_t));
     if (con == NULL) {
         ERROR("%"PRId64" con mem alloc failed\n", con_id);
+        *status = STATUS_ERR_CONNECTION_MEM_ALLOC;
         goto error_ret;
     }
 
@@ -613,6 +728,7 @@ int connect_common(int sfd, struct sockaddr_in * peer_addr, uint64_t con_id)
     // check for timeout establishing the connection
     if (!con->con_resp_recvd) {
         ERROR("%"PRId64" connect response not received\n", con->con_id);
+        *status = STATUS_ERR_NO_RESPONSE_FROM_PEER;
         goto error_ret;
     }
     
@@ -1944,6 +2060,8 @@ int dgram_expected_length(dgram_t * dgram)
         return offsetof(dgram_t, u.connect_req.dgram_end);
     case DGRAM_ID_CONNECT_ACTIVATE:
         return offsetof(dgram_t, u.connect_activate.dgram_end);
+    case DGRAM_ID_CONNECT_REJECT:
+        return offsetof(dgram_t, u.connect_reject.dgram_end);
     case DGRAM_ID_P2P_CON_REQ:
         return offsetof(dgram_t, u.p2p_con_req.dgram_end);
     case DGRAM_ID_P2P_CON_RESP:

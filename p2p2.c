@@ -39,7 +39,7 @@ con_t con_tbl[MAX_HANDLE];
 // prototypes
 //
 
-static int p2p2_connect(char * user_name, char * password, char * wc_name, int service);
+static int p2p2_connect(char * user_name, char * password, char * wc_name, int service, int * connect_status);
 static int p2p2_accept(char * wc_macaddr, int * service, char * user_name);
 static int p2p2_disconnect(int handle);
 static int p2p2_send(int handle, void * buff, int len);
@@ -65,21 +65,32 @@ p2p_routines_t p2p2 = { p2p2_connect,
 
 // -------------------------------------------------------------------------------
 
-static int p2p2_connect(char * user_name, char * password, char * wc_name, int service_id)
+static int p2p2_connect(char * user_name, char * password, char * wc_name, int service_id, int * connect_status)
 {
     char      service[100];
     int       handle;
     con_t   * con;
     pthread_t thread_id;
-    bool      access_denied;  // XXX return this to caller 
+    int       tries = 0;
 
+try_again:
     // connect to cloud_server, with 'wccon' service
     sprintf(service, "wccon %s %d", wc_name, service_id);
-    handle = connect_to_cloud_server(user_name, password, service, &access_denied);
+    handle = connect_to_cloud_server(user_name, password, service, connect_status);
+
+    // retry on WC_ADDR_NOT_AVAIL error
+    if (handle < 0 && *connect_status == STATUS_ERR_WC_ADDR_NOT_AVAIL && ++tries <= 5) {
+        sleep(1);
+        goto try_again;
+    }
 
     // verify handle is in range
     if (handle < 0 || handle >= MAX_HANDLE) {
-        ERROR("unable to connect to cloud_server, handle=%d\n", handle);
+        if (handle >= MAX_HANDLE) {
+            *connect_status = STATUS_ERR_HANDLE_TOO_BIG;
+            close(handle);
+        }
+        ERROR("unable to connect to cloud_server, %s\n", status2str(*connect_status));
         return -1;
     }
 
@@ -94,6 +105,7 @@ static int p2p2_connect(char * user_name, char * password, char * wc_name, int s
     con->mon_thread_id = thread_id;
 
     // return handle
+    *connect_status = STATUS_INFO_OK;
     return handle;
 }
 

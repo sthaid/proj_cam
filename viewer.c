@@ -100,24 +100,6 @@
     (state) == STATE_FATAL_ERROR       ? "STATE_FATAL_ERROR"         \
                                        : "????")
 
-#define SERVER_CHECK_STATUS_NOT_RUN           0
-#define SERVER_CHECK_STATUS_IN_PROGRESS       1
-#define SERVER_CHECK_STATUS_OK                2
-#define SERVER_CHECK_STATUS_NO_USERNAME       3
-#define SERVER_CHECK_STATUS_NO_PASSWORD       4
-#define SERVER_CHECK_STATUS_ACCESS_DENIED     5
-#define SERVER_CHECK_STATUS_UNREACHABLE       6
-
-#define SERVER_CHECK_STATUS_STR(x) \
-    ((x) == SERVER_CHECK_STATUS_NOT_RUN        ? "NOT_RUN"       : \
-     (x) == SERVER_CHECK_STATUS_IN_PROGRESS    ? "IN_PROGRESS"   : \
-     (x) == SERVER_CHECK_STATUS_OK             ? "OK"            : \
-     (x) == SERVER_CHECK_STATUS_NO_USERNAME    ? "NO_USERNAME"   : \
-     (x) == SERVER_CHECK_STATUS_NO_PASSWORD    ? "NO_PASSWORD"   : \
-     (x) == SERVER_CHECK_STATUS_ACCESS_DENIED  ? "ACCESS_DENIED" : \
-     (x) == SERVER_CHECK_STATUS_UNREACHABLE    ? "UNREACHABLE"     \
-                                               : "????")
-
 #define SET_CTL_MODE_LIVE() \
     do { \
         mode.mode = MODE_LIVE; \
@@ -291,7 +273,7 @@ typedef struct {
 
 struct mode_s    mode;
 
-int              server_check_status;
+int              server_check_status = STATUS_INFO_NOT_RUN;
 char             webcam_names[MAX_USER_WC+1][MAX_WC_NAME+1];
 int              max_webcam_names;
 
@@ -485,12 +467,12 @@ void server_check(void)
     pthread_t thread_id;
 
     // if already in progress then return
-    if (server_check_status == SERVER_CHECK_STATUS_IN_PROGRESS) {
+    if (server_check_status == STATUS_INFO_IN_PROGRESS) {
         return;
     }
 
     // init server_check_status to in-progress'
-    server_check_status = SERVER_CHECK_STATUS_IN_PROGRESS;
+    server_check_status = STATUS_INFO_IN_PROGRESS;
 
     // init list with just the NO_WCNAME entry
     max_webcam_names = 0;
@@ -498,11 +480,11 @@ void server_check(void)
 
     // if username or password has not yet been confgured then return
     if (strcmp(CONFIG_USERNAME, NO_USERNAME) == 0) {
-        server_check_status = SERVER_CHECK_STATUS_NO_USERNAME;
+        server_check_status = STATUS_ERR_NO_USERNAME;
         return;
     }
     if (strcmp(CONFIG_PASSWORD, NO_PASSWORD) == 0) {
-        server_check_status = SERVER_CHECK_STATUS_NO_PASSWORD;
+        server_check_status = STATUS_ERR_NO_PASSWORD;
         return;
     }
 
@@ -515,18 +497,18 @@ void * server_check_thread(void * cx)
     int    sfd;
     FILE * fp;
     char   s[MAX_STR];
-    bool   access_denied;
+    int    connect_status;
 
     // detach because this thread will not be joined
     pthread_detach(pthread_self());
 
-    // short delay to allow time for the SERVER_CHECK_STATUS_IN_PROGRESS to be seen on display
+    // short delay to allow time for the STATUS_INFO_IN_PROGRESS to be seen on display
     usleep(500*MS);
 
     // login to cloud server
-    sfd = connect_to_cloud_server(CONFIG_USERNAME, CONFIG_PASSWORD, "command", &access_denied);
+    sfd = connect_to_cloud_server(CONFIG_USERNAME, CONFIG_PASSWORD, "command", &connect_status);
     if (sfd < 0) {
-        server_check_status = (access_denied ? SERVER_CHECK_STATUS_ACCESS_DENIED : SERVER_CHECK_STATUS_UNREACHABLE);
+        server_check_status = connect_status;
         return NULL;
     }
 
@@ -545,8 +527,8 @@ void * server_check_thread(void * cx)
     fclose(fp);
 
     // return success
-    server_check_status = SERVER_CHECK_STATUS_OK;
-    return 0;
+    server_check_status = STATUS_INFO_OK;
+    return NULL;
 }
 
 // -----------------  DISPLAY HANDLER  -----------------------------------
@@ -966,7 +948,7 @@ void display_handler(void)
             break;
         }
 
-        if (server_check_status == SERVER_CHECK_STATUS_IN_PROGRESS &&
+        if (server_check_status == STATUS_INFO_IN_PROGRESS &&
             curr_us - last_window_update_us > 100*MS) 
         {
             break;
@@ -1104,8 +1086,8 @@ void display_handler(void)
         render_text(&ctlpane, 5, 0, str, MOUSE_EVENT_CONFIG_PASSWORD);
 
         render_text(&ctlpane, 7, 0, "SERVER_CHECK", MOUSE_EVENT_CONFIG_SERVER_CHECK);
-        render_text(&ctlpane, 8, 0, SERVER_CHECK_STATUS_STR(server_check_status), MOUSE_EVENT_NONE);
-        if (server_check_status == SERVER_CHECK_STATUS_OK) {
+        render_text(&ctlpane, 8, 0, status2str(server_check_status), MOUSE_EVENT_NONE);
+        if (server_check_status == STATUS_INFO_OK) {
             sprintf(str, ": WC_CNT=%d", max_webcam_names-1);
             render_text(&ctlpane, 8, 2, str, MOUSE_EVENT_NONE);
         }
@@ -1688,7 +1670,7 @@ void * webcam_thread(void * cx)
             break;
 
         case STATE_CONNECTING: {
-            int h;
+            int h, connect_status;
 
             // select the protocol
             p2p = (CONFIG_PROXY == 'N' ? &p2p1 : &p2p2); 
@@ -1702,9 +1684,9 @@ void * webcam_thread(void * cx)
             //     - p2p1 can receive a connect_reject packet, and there are other error paths
             //     - p2p2 can get error status back from connect_from_cloud_server
             //     - should use STATUS_T
-            h = p2p_connect(CONFIG_USERNAME, CONFIG_PASSWORD, wc->image_name, SERVICE_WEBCAM);
+            h = p2p_connect(CONFIG_USERNAME, CONFIG_PASSWORD, wc->image_name, SERVICE_WEBCAM, &connect_status);
             if (h < 0) {  
-                STATE_CHANGE(STATE_CONNECTING_ERROR, "CONNECT ERROR", "", "");
+                STATE_CHANGE(STATE_CONNECTING_ERROR, "CONNECT ERROR", status2str(connect_status), "");
                 break;
             }
 
@@ -1857,7 +1839,7 @@ void * webcam_thread(void * cx)
                     uint32_t status = (wc->mode.mode == MODE_LIVE ? wc->status.cam_status 
                                                                   : wc->status.rp_status);
                     WARN("wc %c: discarding frame msg because %s status is %s\n",
-                         id_char, MODE_STR(wc->mode.mode), STATUS_STR(status));
+                         id_char, MODE_STR(wc->mode.mode), status2str(status));
                     break;
                 }
 

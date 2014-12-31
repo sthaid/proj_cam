@@ -214,8 +214,6 @@ void * service_accept_thread(void * cx)
             ERROR("accept\n");
             continue;
         }
-
-        // debug print the accepted connection
         DEBUG("accept from %s on port %d\n", 
               sock_addr_to_str(s,sizeof(s),(struct sockaddr*)&addr),
               CLOUD_SERVER_PORT);
@@ -257,49 +255,47 @@ void * service_accept_thread(void * cx)
         password  = login+32;
         service   = login+64;
 
-        // verify user_name and password length
-        if (strlen(user_name) > MAX_USER_NAME || strlen(user_name) < MIN_USER_NAME) {
-            sprintf(s,"user_name length, must be %d-%d chars",
-                    MIN_USER_NAME, MAX_USER_NAME);
-            write(sockfd,s,strlen(s));
-            continue;
-        }
-        if (strlen(password) > MAX_PASSWORD || strlen(password) < MIN_PASSWORD) {
-            sprintf(s,"password length, must be %d-%d chars",
-                    MIN_PASSWORD, MAX_PASSWORD);
-            write(sockfd,s,strlen(s));
-            continue;
-        }
-
-        // verify user_name and password character set
-        if (!verify_chars(user_name)) {
-            sprintf(s,"user_name must only contain alphanumeric and '_' chars");
-            write(sockfd,s,strlen(s));
-            continue;
-        }
-        if (!verify_chars(password)) {
-            sprintf(s,"password must only contain alphanumeric and '_' chars");
-            write(sockfd,s,strlen(s));
-            continue;
-        }
-
         // if service is 'create' then 
         if (strcmp(service, "create") == 0) {
-            // write value to socket to indicate login is okay
+            // verify user_name and password length, and character set
+            if (strlen(user_name) > MAX_USER_NAME || strlen(user_name) < MIN_USER_NAME) {
+                sprintf(s,"status=%d", STATUS_ERR_USER_NAME_LENGTH);
+                write(sockfd,s,strlen(s));
+                continue;
+            }
+            if (strlen(password) > MAX_PASSWORD || strlen(password) < MIN_PASSWORD) {
+                sprintf(s,"status=%d", STATUS_ERR_PASSWORD_LENGTH);
+                write(sockfd,s,strlen(s));
+                continue;
+            }
+            if (!verify_chars(user_name)) {
+                sprintf(s,"status=%d", STATUS_ERR_USER_NAME_CHARS);
+                write(sockfd,s,strlen(s));
+                continue;
+            }
+            if (!verify_chars(password)) {
+                sprintf(s,"status=%d", STATUS_ERR_PASSWORD_CHARS);
+                write(sockfd,s,strlen(s));
+                continue;
+            }
+
+            // XXX this needs to follow the login sequence
+
+            // call account_create, no thread used for account_create
+            account_create(sockfd, user_name, password);
+
+            // write value to socket to indicate the account create succeeded
             login_okay = CLOUD_SERVER_LOGIN_OK;
             if (write(sockfd,&login_okay,sizeof(login_okay)) != sizeof(login_okay)) {
                 continue;
             }
-
-            // call account_create, no thread used for account_create
-            account_create(sockfd, user_name, password);
 
         // if service is 'login' then
         } else if (strcmp(service, "login") == 0) {
             // verify user_name and verify password, returns -1 or user tbl idx
             i = verify_user_name_and_password(user_name, password);
             if (i == -1) {
-                sprintf(s,"invalid user_name or password");
+                sprintf(s,"status=%d", STATUS_ERR_INVALID_USER_OR_PASSWD);
                 write(sockfd,s,strlen(s));
                 continue;
             }
@@ -319,7 +315,7 @@ void * service_accept_thread(void * cx)
             // verify user_name and verify password, returns -1 or user tbl idx
             i = verify_user_name_and_password(user_name, password);
             if (i == -1) {
-                sprintf(s,"invalid user_name or password");
+                sprintf(s,"status=%d", STATUS_ERR_INVALID_USER_OR_PASSWD);
                 write(sockfd,s,strlen(s));
                 continue;
             }
@@ -339,7 +335,7 @@ void * service_accept_thread(void * cx)
             // verify user_name and verify password, returns -1 or user tbl idx
             i = verify_user_name_and_password(user_name, password);
             if (i == -1) {
-                sprintf(s,"invalid user_name or password");
+                sprintf(s,"status=%d", STATUS_ERR_INVALID_USER_OR_PASSWD);
                 write(sockfd,s,strlen(s));
                 continue;
             }
@@ -374,7 +370,7 @@ void * service_accept_thread(void * cx)
 
         // invalid service
         } else {
-            sprintf(s,"invalid service '%s'", service);
+            sprintf(s,"status=%d", STATUS_ERR_INVALID_SERVICE);
             write(sockfd,s,strlen(s));
         }
     }
@@ -1143,6 +1139,7 @@ void display_wc(FILE * fp, char * wc_macaddr, user_t * u, int u_wc_idx)
     int i, j;
     bool online;
     char online_wc_addr_str[100] = "";
+    char online_wc_addr_behind_nat_str[100] = "";
     char online_wc_version_str[100] = "";
 
     // if user not supplied then attempt to find the user that owns this wc
@@ -1173,6 +1170,8 @@ void display_wc(FILE * fp, char * wc_macaddr, user_t * u, int u_wc_idx)
             online = true;
             sock_addr_to_str(online_wc_addr_str, sizeof(online_wc_addr_str), 
                              (struct sockaddr *)&onl_wc[i].wc_addr);
+            sock_addr_to_str(online_wc_addr_behind_nat_str, sizeof(online_wc_addr_behind_nat_str), 
+                             (struct sockaddr *)&onl_wc[i].wc_addr_behind_nat);
             sprintf(online_wc_version_str, "%d.%d", 
                     onl_wc[i].version.major, onl_wc[i].version.minor);
             break;
@@ -1181,15 +1180,16 @@ void display_wc(FILE * fp, char * wc_macaddr, user_t * u, int u_wc_idx)
 
     // display, examples:
     // wc1          steve        80:1f:02:d3:9f:0c   offline
-    // wc1          steve        80:1f:02:d3:9f:0c   online     14.91.92.44:7575  1.0
-    // ---          ---          80:1f:02:d3:9f:0c   online     14.91.92.44:7575  1.0
-    prcl(fp, "%-12s %-12s %-17s %-7s  %s  %s\n",
+    // wc1          steve        80:1f:02:d3:9f:0c   online   1.0   14.91.92.44:7575  192.168.1.101:7575
+    // ---          ---          80:1f:02:d3:9f:0c   online   1.0   14.91.92.44:7575  192.168.1.102:7575
+    prcl(fp, "%-12s %-12s %-17s %-7s  %s  %s  %s\n",
          u ? u->wc[u_wc_idx].wc_name : "---",
          u ? u->user_name : "---",
          wc_macaddr,
          online ? "online " : "offline",
+         online_wc_version_str,
          online_wc_addr_str,
-         online_wc_version_str);
+         online_wc_addr_behind_nat_str);
 }
 
 int verify_user_name_and_password(char * user_name, char *password) 
@@ -1283,7 +1283,7 @@ p2p_routines_t * p2p = &p2p1;
 void * wccon_thread(void * cxarg)
 {
     wccon_cx_t * cx = cxarg;
-    int login_okay, cnt, handle, len, service_id, rc;
+    int login_okay, cnt, handle, len, service_id, rc, connect_status;
     char wc_name[100];
     char buff[50000];
     char s[100];
@@ -1294,19 +1294,19 @@ void * wccon_thread(void * cxarg)
     // detach because this thread will not be joined
     pthread_detach(pthread_self());
 
-    // get the wc_name and webcam service from cx->service
+    // get the wc_name and service_id from cx->service
     cnt = sscanf(cx->service, "wccon %s %d", wc_name, &service_id);
     if (cnt != 2) {
-        sprintf(s, "invalid '%s'", cx->service);
+        sprintf(s,"status=%d", STATUS_ERR_INVALID_SERVICE);
         write(cx->sockfd,s,strlen(s));
         free(cx);
         return NULL;
     }
 
     // connect to webcam
-    handle = p2p_connect(cx->user_name, cx->password, wc_name, service_id);
+    handle = p2p_connect(cx->user_name, cx->password, wc_name, service_id, &connect_status);
     if (handle < 0) {
-        sprintf(s, "failed to connect to %s", wc_name);
+        sprintf(s,"status=%d", connect_status);
         write(cx->sockfd,s,strlen(s));
         free(cx);
         return NULL;
@@ -1523,6 +1523,7 @@ void * dgram_thread(void * cx)
             struct sockaddr_in * client_addr = &from_addr;
             user_t             * u;
             char                 s1[100], s2[100];
+            int                  status = STATUS_ERR_GENERAL_FAILURE;
 
             // XXX seeing a lot of prints here when attempting to connect to a wc not online
 
@@ -1538,30 +1539,22 @@ void * dgram_thread(void * cx)
             i = verify_user_name_and_password(dgram_rcv.u.connect_req.user_name, dgram_rcv.u.connect_req.password);
             if (i == -1) {
                 ERROR("invalid user_name or password\n");
-                break;
+                status = STATUS_ERR_INVALID_USER_OR_PASSWD;
+                goto connect_reject;
             }
             u = &user[i];
 
-            // verify connect request wc_name is either name or num
-            if (!verify_wc_macaddr(dgram_rcv.u.connect_req.wc_name) &&
-                !verify_wc_name(dgram_rcv.u.connect_req.wc_name))
-            {
-                ERROR("connect request to '%s', not a valid number or name\n", dgram_rcv.u.connect_req.wc_name);
-                break;
-            }
-
             // find the wc_name in the user wc table
-            // note - the connect_req.wc_name can be either the wc_name or the wc_macaddr
             for (i = 0; i < MAX_USER_WC; i++) {
-                if (strcmp(dgram_rcv.u.connect_req.wc_name, u->wc[i].wc_macaddr) == 0 ||
-                    strcmp(dgram_rcv.u.connect_req.wc_name, u->wc[i].wc_name) == 0)
-                {
+                if (strcmp(dgram_rcv.u.connect_req.wc_name, u->wc[i].wc_name) == 0) {
                     break;
                 }
             }
             if (i == MAX_USER_WC) {
-                ERROR("wc %s is not owned by %s\n", dgram_rcv.u.connect_req.wc_name, u->user_name);
-                break;
+                ERROR("wc '%s' does not exist for user '%s'\n", 
+                      dgram_rcv.u.connect_req.wc_name, u->user_name);
+                status = STATUS_ERR_WC_DOES_NOT_EXIST;
+                goto connect_reject;
             }
 
             // find wc_macaddr in the onl_wc table
@@ -1571,19 +1564,22 @@ void * dgram_thread(void * cx)
                 }
             }
             if (j == max_onl_wc) {
-                ERROR("wc %s is not online\n", dgram_rcv.u.connect_req.wc_name);
-                break;
+                ERROR("wc '%s' is not online\n", dgram_rcv.u.connect_req.wc_name);
+                status = STATUS_ERR_WC_NOT_ONLINE;
+                goto connect_reject;
             }
 
             // extract the wc_addr from the onl_wc table, and verify
             wc_addr = &onl_wc[j].wc_addr;
             wc_addr_behind_nat = &onl_wc[j].wc_addr_behind_nat;
             if (wc_addr->sin_family == 0 || wc_addr_behind_nat->sin_family == 0) {
-                ERROR("wc %s no address\n", dgram_rcv.u.connect_req.wc_name);
-                break;
+                ERROR("wc '%s' address is not currently available\n", dgram_rcv.u.connect_req.wc_name);
+                status = STATUS_ERR_WC_ADDR_NOT_AVAIL;
+                goto connect_reject;
             }
 
             // construct the connect activate dgram
+            bzero(&dgram_snd, sizeof(dgram_snd));
             dgram_snd.id = DGRAM_ID_CONNECT_ACTIVATE;
             dgram_snd.u.connect_activate.con_id  = gen_con_id();
             dgram_snd.u.connect_activate.service = dgram_rcv.u.connect_req.service;
@@ -1598,16 +1594,17 @@ void * dgram_thread(void * cx)
                 dgram_snd.u.connect_activate.client_addr = *client_addr;
                 dgram_snd.u.connect_activate.wc_addr    = *wc_addr;
             }
+            dgram_snd.u.connect_activate.dgram_uid = dgram_rcv.u.connect_req.dgram_uid;
 
             // send the connect activate dgram to both peers
             for (k = 0; k < 3; k++) {
                 len = sendto(sfd, &dgram_snd, offsetof(dgram_t,u.connect_activate.dgram_end), 0,
-                            (struct sockaddr *)client_addr, sizeof(dgram_snd));
+                            (struct sockaddr *)client_addr, sizeof(struct sockaddr_in));
                 if (len != offsetof(dgram_t,u.connect_activate.dgram_end)) {
                     ERROR("send connect_activate to client\n");
                 }
                 len = sendto(sfd, &dgram_snd, offsetof(dgram_t,u.connect_activate.dgram_end), 0,
-                            (struct sockaddr *)wc_addr, sizeof(dgram_snd));
+                            (struct sockaddr *)wc_addr, sizeof(struct sockaddr_in));
                 if (len != offsetof(dgram_t,u.connect_activate.dgram_end)) {
                     ERROR("send connect_activate to webcam\n");
                 }
@@ -1616,6 +1613,21 @@ void * dgram_thread(void * cx)
             // clear wc_addr, because we need to receive new wc_addr for the next connection
             bzero(wc_addr, sizeof(struct sockaddr_in));
             bzero(wc_addr_behind_nat, sizeof(struct sockaddr_in));
+            break;
+
+connect_reject:
+            // send the connect reject dgram back to the requesting client
+            bzero(&dgram_snd, sizeof(dgram_snd));
+            dgram_snd.id = DGRAM_ID_CONNECT_REJECT;
+            dgram_snd.u.connect_reject.status = status;
+            dgram_snd.u.connect_reject.dgram_uid = dgram_rcv.u.connect_req.dgram_uid;
+            for (k = 0; k < 3; k++) {
+                len = sendto(sfd, &dgram_snd, offsetof(dgram_t,u.connect_reject.dgram_end), 0,
+                            (struct sockaddr *)client_addr, sizeof(struct sockaddr_in));
+                if (len != offsetof(dgram_t,u.connect_activate.dgram_end)) {
+                    ERROR("send connect_reject to client\n");
+                }
+            }
         } while (0);
     }
 

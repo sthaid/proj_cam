@@ -96,14 +96,14 @@ int main(int argc, char **argv)
 void nettest_to_webcam(char * user_name, char * password, char * wc_name)
 {
     char      s[100], cmd[100];
-    int       val, cnt;
+    int       val, cnt, connect_status;
     pthread_t send_thread_id, recv_thread_id;
 
     // connect to the webcam
-    handle = p2p_connect(user_name, password, wc_name, SERVICE_NETTEST);
+    handle = p2p_connect(user_name, password, wc_name, SERVICE_NETTEST, &connect_status);
     if (handle < 0) {
-        ERROR("p2p_connect to %s failed\n", wc_name);
-        return;
+        PRINTF("connect to %s failed, %s\n", wc_name, status2str(connect_status));
+        exit(1);
     }
 
     // log starting notice

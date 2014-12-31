@@ -92,7 +92,7 @@ int config_write(char * config_path, config_t * config, int config_version);
 #define HTTP_CONNECT_REQ  "CONNECT " CLOUD_SERVER_HOSTNAME ":80 HTTP/1.0\r\n\r\n"
 #define HTTP_CONNECT_RESP "HTTP/1.0 200 OK\r\n\r\n"
 
-int connect_to_cloud_server(char * user_name, char * password, char * service, bool * access_denied);
+int connect_to_cloud_server(char * user_name, char * password, char * service, int * connect_status);
 
 // -----------------  PEER TO PEER COMMUNICATION  ------------------------------------
 
@@ -142,7 +142,7 @@ typedef struct {
 #define p2p_debug_con   (*p2p->debug_con)
 
 typedef struct {
-    int (*connect)(char * user_name, char * password, char * wc_name, int service);
+    int (*connect)(char * user_name, char * password, char * wc_name, int service, int * connect_status);
     int (*accept)(char * wc_macaddr, int * service, char * user_name);
     int (*disconnect)(int handle);
     int (*send)(int handle, void * buff, int len);
@@ -158,9 +158,10 @@ extern p2p_routines_t * p2p;
 
 #define MAX_ACK 10
 
-#define DGRAM_ID_WC_ANNOUNCE       1234000001
+#define DGRAM_ID_WC_ANNOUNCE        1234000001
 #define DGRAM_ID_CONNECT_REQ        1234000011
 #define DGRAM_ID_CONNECT_ACTIVATE   1234000012
+#define DGRAM_ID_CONNECT_REJECT     1234000013
 #define DGRAM_ID_P2P_CON_REQ        1234000021
 #define DGRAM_ID_P2P_CON_RESP       1234000022
 #define DGRAM_ID_P2P_DATA           1234000023
@@ -168,9 +169,10 @@ extern p2p_routines_t * p2p;
 #define DGRAM_ID_P2P_STATS          1234000025
 
 #define DGRAM_ID_STR(x) \
-    ((x) == DGRAM_ID_WC_ANNOUNCE     ? "DGRAM_ID_WC_ANNOUNCE"     : \
+    ((x) == DGRAM_ID_WC_ANNOUNCE      ? "DGRAM_ID_WC_ANNOUNCE"      : \
      (x) == DGRAM_ID_CONNECT_REQ      ? "DGRAM_ID_CONNECT_REQ"      : \
      (x) == DGRAM_ID_CONNECT_ACTIVATE ? "DGRAM_ID_CONNECT_ACTIVATE" : \
+     (x) == DGRAM_ID_CONNECT_REJECT   ? "DGRAM_ID_CONNECT_REJECT"   : \
      (x) == DGRAM_ID_P2P_CON_REQ      ? "DGRAM_ID_P2P_CON_REQ"      : \
      (x) == DGRAM_ID_P2P_CON_RESP     ? "DGRAM_ID_P2P_CON_RESP"     : \
      (x) == DGRAM_ID_P2P_DATA         ? "DGRAM_ID_P2P_DATA"         : \
@@ -179,6 +181,10 @@ extern p2p_routines_t * p2p;
                                         "DGRAM_ID_????")
 
 #pragma pack(push,1)
+typedef struct {
+    uint32_t v[4];
+} dgram_uid_t;
+
 typedef struct {
     int id;
     int pad;
@@ -195,6 +201,7 @@ typedef struct {
            char wc_name[MAX_WC_NAME+1];
             int service;
             struct sockaddr_in client_addr_behind_nat;
+            dgram_uid_t dgram_uid;
             char dgram_end;
         } connect_req;
         struct {
@@ -203,8 +210,14 @@ typedef struct {
             int service;
             struct sockaddr_in client_addr;
             struct sockaddr_in wc_addr;
+            dgram_uid_t dgram_uid;
             char dgram_end;
         } connect_activate;
+        struct {
+            int status;
+            dgram_uid_t dgram_uid;
+            char dgram_end;
+        } connect_reject;
         struct {
             uint64_t con_id; 
             char dgram_end;
@@ -240,6 +253,9 @@ typedef struct {
 #pragma pack(pop)
 
 extern p2p_routines_t p2p1;
+
+dgram_uid_t dgram_uid_gen(void);
+bool dgram_uid_equal(dgram_uid_t * x, dgram_uid_t * y);
 
 // - - - - - - - - -  P2P2 DEFINITIONS   - - - - - - - - - - - - - - - - - - - - - - - 
 
@@ -291,7 +307,9 @@ typedef struct {
 #define STATUS_INFO_GAP                      2
 #define STATUS_INFO_LOADING_IMAGE            3
 #define STATUS_INFO_CHANGING_RESOLUTION      4
-#define STATUS_ERR_NOT_OK                    100
+#define STATUS_INFO_NOT_RUN                  5
+#define STATUS_INFO_IN_PROGRESS              6
+#define STATUS_ERR_GENERAL_FAILURE           100
 #define STATUS_ERR_FRAME_FILE_OFFSET_INVLD   101
 #define STATUS_ERR_FRAME_FILE_EMPTY          102
 #define STATUS_ERR_FRAME_BEFORE_BOD          103
@@ -310,6 +328,33 @@ typedef struct {
 #define STATUS_ERR_DEAD                      116
 #define STATUS_ERR_WEBCAM_FAILURE            117
 #define STATUS_ERR_SYSTEM_CLOCK_NOT_SET      118
+#define STATUS_ERR_NO_USERNAME               119
+#define STATUS_ERR_NO_PASSWORD               120
+#define STATUS_ERR_HANDLE_TOO_BIG            121
+#define STATUS_ERR_GET_SERVER_ADDR           122
+#define STATUS_ERR_CREATE_SOCKET             123
+#define STATUS_ERR_GET_LOCAL_ADDR            124
+#define STATUS_ERR_BIND_LOCAL_ADDR           125
+#define STATUS_ERR_GETSOCKNAME               126
+#define STATUS_ERR_SENDTO                    127
+#define STATUS_ERR_RECVFROM                  128
+#define STATUS_ERR_NO_RESPONSE_FROM_SERVER   129
+#define STATUS_ERR_INVALID_CONNECTION_ID     130
+#define STATUS_ERR_DUPLICATE_CONNECTION_ID   131
+#define STATUS_ERR_TOO_MANY_CONNECTIONS      132
+#define STATUS_ERR_CONNECTION_MEM_ALLOC      133
+#define STATUS_ERR_NO_RESPONSE_FROM_PEER     134
+#define STATUS_ERR_SERVER_CONNECT            135
+#define STATUS_ERR_INVALID_LOGIN_RESPONSE    136
+#define STATUS_ERR_USER_NAME_LENGTH          137
+#define STATUS_ERR_PASSWORD_LENGTH           138
+#define STATUS_ERR_USER_NAME_CHARS           139
+#define STATUS_ERR_PASSWORD_CHARS            140
+#define STATUS_ERR_INVALID_USER_OR_PASSWD    141
+#define STATUS_ERR_INVALID_SERVICE           142
+#define STATUS_ERR_WC_DOES_NOT_EXIST         143
+#define STATUS_ERR_WC_NOT_ONLINE             144
+#define STATUS_ERR_WC_ADDR_NOT_AVAIL         145
 
 #define STATUS_STR(status) \
     ((status) == STATUS_INFO_OK                       ? "OK"                      : \
@@ -317,7 +362,9 @@ typedef struct {
      (status) == STATUS_INFO_GAP                      ? "GAP"                     : \
      (status) == STATUS_INFO_LOADING_IMAGE            ? "LOADING_IMAGE"           : \
      (status) == STATUS_INFO_CHANGING_RESOLUTION      ? "CHANGING_RESOLUTION"     : \
-     (status) == STATUS_ERR_NOT_OK                    ? "NOT_OK"                  : \
+     (status) == STATUS_INFO_NOT_RUN                  ? "NOT_RUN"                 : \
+     (status) == STATUS_INFO_IN_PROGRESS              ? "IN_PROGRESS"             : \
+     (status) == STATUS_ERR_GENERAL_FAILURE           ? "GENERAL_FAILURE"         : \
      (status) == STATUS_ERR_FRAME_FILE_OFFSET_INVLD   ? "FRAME_FILE_OFFSET_INVLD" : \
      (status) == STATUS_ERR_FRAME_FILE_EMPTY          ? "FRAME_FILE_EMPTY"        : \
      (status) == STATUS_ERR_FRAME_BEFORE_BOD          ? "FRAME_BEFORE_BOD"        : \
@@ -336,6 +383,33 @@ typedef struct {
      (status) == STATUS_ERR_DEAD                      ? "DEAD"                    : \
      (status) == STATUS_ERR_WEBCAM_FAILURE            ? "WEBCAM_FAILURE"          : \
      (status) == STATUS_ERR_SYSTEM_CLOCK_NOT_SET      ? "SYSTEM_CLOCK_NOT_SET"    : \
+     (status) == STATUS_ERR_NO_USERNAME               ? "NO_USERNAME"             : \
+     (status) == STATUS_ERR_NO_PASSWORD               ? "NO_PASSWORD"             : \
+     (status) == STATUS_ERR_HANDLE_TOO_BIG            ? "HANDLE_TOO_BIG"          : \
+     (status) == STATUS_ERR_GET_SERVER_ADDR           ? "GET_SERVER_ADDR"         : \
+     (status) == STATUS_ERR_CREATE_SOCKET             ? "CREATE_SOCKET"           : \
+     (status) == STATUS_ERR_GET_LOCAL_ADDR            ? "GET_LOCAL_ADDR"          : \
+     (status) == STATUS_ERR_BIND_LOCAL_ADDR           ? "BIND_LOCAL_ADDR"         : \
+     (status) == STATUS_ERR_GETSOCKNAME               ? "GETSOCKNAME"             : \
+     (status) == STATUS_ERR_SENDTO                    ? "SENDTO"                  : \
+     (status) == STATUS_ERR_RECVFROM                  ? "RECVFROM"                : \
+     (status) == STATUS_ERR_NO_RESPONSE_FROM_SERVER   ? "NO_RESPONSE_FROM_SERVER" : \
+     (status) == STATUS_ERR_INVALID_CONNECTION_ID     ? "INVALID_CONNECTION_ID"   : \
+     (status) == STATUS_ERR_DUPLICATE_CONNECTION_ID   ? "DUPLICATE_CONNECTION_ID" : \
+     (status) == STATUS_ERR_TOO_MANY_CONNECTIONS      ? "TOO_MANY_CONNECTIONS"    : \
+     (status) == STATUS_ERR_CONNECTION_MEM_ALLOC      ? "CONNECTION_MEM_ALLOC"    : \
+     (status) == STATUS_ERR_NO_RESPONSE_FROM_PEER     ? "NO_RESPONSE_FROM_PEER"   : \
+     (status) == STATUS_ERR_SERVER_CONNECT            ? "SERVER_CONNECT"          : \
+     (status) == STATUS_ERR_INVALID_LOGIN_RESPONSE    ? "INVALID_LOGIN_RESPONSE"  : \
+     (status) == STATUS_ERR_USER_NAME_LENGTH          ? "USER_NAME_LENGTH"        : \
+     (status) == STATUS_ERR_PASSWORD_LENGTH           ? "PASSWORD_LENGTH"         : \
+     (status) == STATUS_ERR_USER_NAME_CHARS           ? "USER_NAME_CHARS"         : \
+     (status) == STATUS_ERR_PASSWORD_CHARS            ? "PASSWORD_CHARS"          : \
+     (status) == STATUS_ERR_INVALID_USER_OR_PASSWD    ? "ACCESS_DENIED"            : \
+     (status) == STATUS_ERR_INVALID_SERVICE           ? "INVALID_SERVICE"         : \
+     (status) == STATUS_ERR_WC_DOES_NOT_EXIST         ? "WC_DOES_NOT_EXIST"       : \
+     (status) == STATUS_ERR_WC_NOT_ONLINE             ? "WC_NOT_ONLINE"           : \
+     (status) == STATUS_ERR_WC_ADDR_NOT_AVAIL         ? "WC_ADDR_NOT_AVAIL"       : \
                                                         "????")
 
 // mode values

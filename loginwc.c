@@ -26,7 +26,7 @@ int main(int argc, char **argv)
     char         * password;
     char         * wc_name;
     pthread_t      thread;
-    int            len, rc;
+    int            len, rc, connect_status;
     char           buf[1000], opt_char;
     struct termios termios;
     struct termios termios_initial;
@@ -80,9 +80,9 @@ int main(int argc, char **argv)
     wc_name = argv[optind];
 
     // connect to the webcam
-    handle = p2p_connect(user_name, password, wc_name, SERVICE_SHELL);
+    handle = p2p_connect(user_name, password, wc_name, SERVICE_SHELL, &connect_status);
     if (handle < 0) {
-        ERROR("p2p_connect to %s failed\n", wc_name);
+        PRINTF("connect to %s failed, %s\n", wc_name, status2str(connect_status));
         return 1;
     }
 
