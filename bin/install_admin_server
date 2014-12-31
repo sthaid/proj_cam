@@ -1,0 +1,30 @@
+#!/bin/bash
+
+user=haid
+host=sthaid-rs.dyndns.org
+
+echo
+echo "----------- INSTALL_ADMIN_SERVER ----------"
+
+echo
+echo SEND TAR FILE TO $user@$host
+scp -p \
+  admin_server.c p2p1.c util.c wc.h Makefile \
+  $user@$host:proj_cam
+
+echo
+echo STOP ADMIN_SERVER 
+ssh $user@$host sudo service admin_server stop
+
+echo 
+echo BUILD 
+ssh $user@$host "cd proj_cam; make admin_server"
+
+echo
+echo START ADMIN_SERVER 
+ssh $user@$host sudo service admin_server start
+
+echo
+echo STATUS ADMIN_SERVER
+ssh $user@$host sudo service admin_server status
+

@@ -1,0 +1,3 @@
+#!/bin/bash
+
+sudo service admin_server stop

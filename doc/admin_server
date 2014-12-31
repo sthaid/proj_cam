@@ -10,7 +10,7 @@ PROCEDURE
   - copy files to bin dir
 
 - setup files in /etc
-  - follow instructions below for /etc/init.d/cloud_server
+  - follow instructions below for /etc/init.d/admin_server
 
 - setup sudo  (visudo)
   - add yourself to sudo, and
@@ -20,11 +20,11 @@ PROCEDURE
   - yum install readline-devel
   - others ??
 
-- build and install cloud_server 
-  - bin/cloud_server_install
+- build and install admin_server 
+  - bin/admin_server_install
 
 
-FILE /etc/init.d/cloud_server
+FILE /etc/init.d/admin_server
 -----------------------------
 
 #!/bin/sh
@@ -33,12 +33,12 @@ FILE /etc/init.d/cloud_server
 
 # install instructions ...
 # 
-# create this file in /etc/init.d/cloud_server
-# chkconfig --add cloud_server
-# service cloud_server start
+# create this file in /etc/init.d/admin_server
+# chkconfig --add admin_server
+# service admin_server start
 
 dir=/home/haid/proj_cam
-prog=cloud_server
+prog=admin_server
 retval=0
 
 start() {

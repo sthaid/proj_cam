@@ -356,7 +356,7 @@ int main(int argc, char **argv)
         FATAL("config_read failed for %s\n", config_path);
     }
 
-    // call server_check to verify login to cloud server, and 
+    // call server_check to verify login to admin server, and 
     // get the list of webcams owned by this user
     server_check();
 
@@ -505,8 +505,8 @@ void * server_check_thread(void * cx)
     // short delay to allow time for the STATUS_INFO_IN_PROGRESS to be seen on display
     usleep(500*MS);
 
-    // login to cloud server
-    sfd = connect_to_cloud_server(CONFIG_USERNAME, CONFIG_PASSWORD, "command", &connect_status);
+    // login to admin server
+    sfd = connect_to_admin_server(CONFIG_USERNAME, CONFIG_PASSWORD, "command", &connect_status);
     if (sfd < 0) {
         server_check_status = connect_status;
         return NULL;
@@ -1694,7 +1694,7 @@ void * webcam_thread(void * cx)
             // attempt to connect to wc_name
             //ZZZ can this now return a status
             //     - p2p1 can receive a connect_reject packet, and there are other error paths
-            //     - p2p2 can get error status back from connect_from_cloud_server
+            //     - p2p2 can get error status back from connect_from_admin_server
             //     - should use STATUS_T
             h = p2p_connect(CONFIG_USERNAME, CONFIG_PASSWORD, wc->image_name, SERVICE_WEBCAM, &connect_status);
             if (h < 0) {  

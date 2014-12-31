@@ -75,9 +75,9 @@ int config_write(char * config_path, config_t * config, int config_version)
     return 0;
 }
 
-// -----------------  CONNECT_TO_CLOUD_SERVER   --------------------------
+// -----------------  CONNECT_TO_ADMIN_SERVER   --------------------------
 
-int connect_to_cloud_server(char * user_name, char * password, char * service, int * connect_status)
+int connect_to_admin_server(char * user_name, char * password, char * service, int * connect_status)
 {
     struct sockaddr_in addr;
     char               login[3*32];
@@ -89,15 +89,15 @@ int connect_to_cloud_server(char * user_name, char * password, char * service, i
     // preset returned status
     *connect_status = STATUS_ERR_GENERAL_FAILURE;
 
-    // get address of CLOUD_SERVER
-    ret =  getsockaddr(CLOUD_SERVER_HOSTNAME, CLOUD_SERVER_PORT, SOCK_STREAM, 0, &addr); 
+    // get address of ADMIN_SERVER
+    ret =  getsockaddr(ADMIN_SERVER_HOSTNAME, ADMIN_SERVER_PORT, SOCK_STREAM, 0, &addr); 
     if (ret < 0) {
-        ERROR("failed to get address of %s\n", CLOUD_SERVER_HOSTNAME);
+        ERROR("failed to get address of %s\n", ADMIN_SERVER_HOSTNAME);
         *connect_status = STATUS_ERR_GET_SERVER_ADDR;
         return -1;
     }
     INFO("address of %s is %s\n",
-          CLOUD_SERVER_HOSTNAME, sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&addr));
+          ADMIN_SERVER_HOSTNAME, sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&addr));
 
     // create socket
     sfd = socket(AF_INET, SOCK_STREAM|SOCK_CLOEXEC, 0);
@@ -107,7 +107,7 @@ int connect_to_cloud_server(char * user_name, char * password, char * service, i
         return -1;
     } 
 
-    // connect to the cloud server
+    // connect to the admin server
     ret = connect(sfd, (struct sockaddr *)&addr, sizeof(addr));
     if (ret == -1) {
         ERROR("connect, %s\n", strerror(errno));
@@ -148,7 +148,7 @@ int connect_to_cloud_server(char * user_name, char * password, char * service, i
     strncpy(login+64, service,   31);
     len = write(sfd, login, sizeof(login));
     if (len != sizeof(login)) {
-        ERROR("sending login request to cloud server, %s\n", strerror(errno));
+        ERROR("sending login request to admin server, %s\n", strerror(errno));
         close(sfd);
         *connect_status = STATUS_ERR_SERVER_CONNECT;
         return -1;
@@ -157,14 +157,14 @@ int connect_to_cloud_server(char * user_name, char * password, char * service, i
     // read login response
     len = recv(sfd, &login_response, sizeof(login_response), MSG_WAITALL);
     if (len != sizeof(login_response)) {
-        ERROR("reading login response from cloud server, %s\n", strerror(errno));
+        ERROR("reading login response from admin server, %s\n", strerror(errno));
         close(sfd);
         *connect_status = STATUS_ERR_SERVER_CONNECT;
         return -1;
     }
 
     // verify login response
-    if (login_response != CLOUD_SERVER_LOGIN_OK) {
+    if (login_response != ADMIN_SERVER_LOGIN_OK) {
         bzero(login_err_str,sizeof(login_err_str));
         memcpy(login_err_str, &login_response, 4);
         read(sfd,login_err_str+4,sizeof(login_err_str)-5);

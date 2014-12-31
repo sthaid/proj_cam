@@ -204,7 +204,7 @@ p2p_routines_t p2p1 = { p2p1_connect,
 
 int p2p1_connect(char * user_name, char * password, char * wc_name, int service, int * connect_status)
 {
-    struct sockaddr_in cloud_server_addr;
+    struct sockaddr_in admin_server_addr;
     struct sockaddr_in local_addr;
     dgram_t            dgram;
     int                sfd = -1;
@@ -223,16 +223,16 @@ int p2p1_connect(char * user_name, char * password, char * wc_name, int service,
     // preset connect_status return 
     *connect_status = STATUS_ERR_GENERAL_FAILURE;
 
-    // get address of CLOUD_SERVER
-    ret =  getsockaddr(CLOUD_SERVER_HOSTNAME, CLOUD_SERVER_DGRAM_PORT, SOCK_DGRAM, IPPROTO_UDP, &cloud_server_addr);
+    // get address of ADMIN_SERVER
+    ret =  getsockaddr(ADMIN_SERVER_HOSTNAME, ADMIN_SERVER_DGRAM_PORT, SOCK_DGRAM, IPPROTO_UDP, &admin_server_addr);
     if (ret < 0) {
-        ERROR("failed to get address of %s\n",  CLOUD_SERVER_HOSTNAME);
+        ERROR("failed to get address of %s\n",  ADMIN_SERVER_HOSTNAME);
         *connect_status = STATUS_ERR_GET_SERVER_ADDR;
         goto error_ret;
     }
     INFO("address of %s is %s\n",
-         CLOUD_SERVER_HOSTNAME, 
-         sock_addr_to_str(s, sizeof(s), (struct sockaddr*)&cloud_server_addr));
+         ADMIN_SERVER_HOSTNAME, 
+         sock_addr_to_str(s, sizeof(s), (struct sockaddr*)&admin_server_addr));
 
     // create socket 
     sfd = socket(AF_INET, SOCK_DGRAM|SOCK_CLOEXEC, IPPROTO_UDP);
@@ -256,7 +256,7 @@ int p2p1_connect(char * user_name, char * password, char * wc_name, int service,
         goto error_ret;
     }
 
-    // repeat tries to receive the peer to peer info from cloud_server
+    // repeat tries to receive the peer to peer info from admin_server
     // that is needed to establish the connection to the webcam
     for (i = 0; i < 5; i++) {
         // generate the dgram_uid, which is used to validate the response 
@@ -282,7 +282,7 @@ int p2p1_connect(char * user_name, char * password, char * wc_name, int service,
 
         // send the connect request dgram
         ret = sendto(sfd, &dgram, offsetof(dgram_t,u.connect_req.dgram_end), 0,
-                     (struct sockaddr *)&cloud_server_addr, sizeof(cloud_server_addr));
+                     (struct sockaddr *)&admin_server_addr, sizeof(admin_server_addr));
         if (ret != offsetof(dgram_t,u.connect_req.dgram_end)) {
             ERROR("send connect");
             *connect_status = STATUS_ERR_SENDTO;
@@ -317,7 +317,7 @@ int p2p1_connect(char * user_name, char * password, char * wc_name, int service,
 
             // if dgram is not from server then receive again
             if (fromlen != sizeof(struct sockaddr_in) ||
-                memcmp(&cloud_server_addr, &from, sizeof(from)) != 0) 
+                memcmp(&admin_server_addr, &from, sizeof(from)) != 0) 
             {
                 ERROR("ignoring dgram - from unexpected address\n");
                 continue;
@@ -402,8 +402,8 @@ int p2p1_accept(char * wc_macaddr, int * service, char * user_name)
     #define MAX_DGRAM_UID_TBL 30
 
     struct sockaddr_in   local_addr;
-    struct sockaddr_in   cloud_server_addr;
-    struct sockaddr_in   new_cloud_server_addr;
+    struct sockaddr_in   admin_server_addr;
+    struct sockaddr_in   new_admin_server_addr;
     int                  sfd = -1;
     int                  ret, handle, status, i;
     dgram_t              dgram;
@@ -435,7 +435,7 @@ try_again:
     *service = SERVICE_INVALID;
     user_name[0] = '\0';
 
-    // create socket for to communicate with CLOUD_SERVER_HOSTNAME
+    // create socket for to communicate with ADMIN_SERVER_HOSTNAME
     sfd = socket(AF_INET, SOCK_DGRAM|SOCK_CLOEXEC, IPPROTO_UDP);
     if (sfd == -1) {
         ERROR("socket %s\n", strerror(errno));
@@ -454,32 +454,32 @@ try_again:
         goto try_again;
     }
 
-    // get address of CLOUD_SERVER_HOSTNAME
+    // get address of ADMIN_SERVER_HOSTNAME
     while (true) {
-        ret = getsockaddr(CLOUD_SERVER_HOSTNAME, CLOUD_SERVER_DGRAM_PORT, SOCK_DGRAM, IPPROTO_UDP, &cloud_server_addr);
+        ret = getsockaddr(ADMIN_SERVER_HOSTNAME, ADMIN_SERVER_DGRAM_PORT, SOCK_DGRAM, IPPROTO_UDP, &admin_server_addr);
         if (ret < 0) {
-            ERROR("failed to get address of %s, retry in 10 secs\n", CLOUD_SERVER_HOSTNAME);
+            ERROR("failed to get address of %s, retry in 10 secs\n", ADMIN_SERVER_HOSTNAME);
             sleep(10);
             continue;
         }
         time_last_getsockaddr_ms = MILLISEC_TIMER;
         INFO("address of %s is %s\n", 
-            CLOUD_SERVER_HOSTNAME, 
-            sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&cloud_server_addr));
+            ADMIN_SERVER_HOSTNAME, 
+            sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&admin_server_addr));
         break;
     }
 
-    // loop until we get a peer_addr and conn_id from cloud_server
+    // loop until we get a peer_addr and conn_id from admin_server
     while (true) {
-        // every 10 minutes try to get an updated address for CLOUD_SERVER_HOSTNAME
+        // every 10 minutes try to get an updated address for ADMIN_SERVER_HOSTNAME
         if (MILLISEC_TIMER - time_last_getsockaddr_ms > 10*60000) {
             time_last_getsockaddr_ms = MILLISEC_TIMER;
-            ret = getsockaddr(CLOUD_SERVER_HOSTNAME, CLOUD_SERVER_DGRAM_PORT, SOCK_DGRAM, IPPROTO_UDP, &new_cloud_server_addr);
-            if (ret == 0 && memcmp(&new_cloud_server_addr, &cloud_server_addr, sizeof(struct sockaddr_in)) != 0) {
-                cloud_server_addr = new_cloud_server_addr;
+            ret = getsockaddr(ADMIN_SERVER_HOSTNAME, ADMIN_SERVER_DGRAM_PORT, SOCK_DGRAM, IPPROTO_UDP, &new_admin_server_addr);
+            if (ret == 0 && memcmp(&new_admin_server_addr, &admin_server_addr, sizeof(struct sockaddr_in)) != 0) {
+                admin_server_addr = new_admin_server_addr;
                 INFO("address of %s has changed to %s\n", 
-                     CLOUD_SERVER_HOSTNAME, 
-                     sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&cloud_server_addr));
+                     ADMIN_SERVER_HOSTNAME, 
+                     sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&admin_server_addr));
             }
         }
 
@@ -499,10 +499,10 @@ try_again:
 
         // send wc announce
         ret = sendto(sfd, &dgram, offsetof(dgram_t,u.wc_announce.dgram_end), 0,
-                     (struct sockaddr *)&cloud_server_addr, sizeof(cloud_server_addr));
+                     (struct sockaddr *)&admin_server_addr, sizeof(admin_server_addr));
         if (ret != offsetof(dgram_t,u.wc_announce.dgram_end)) {
             ERROR("send announce to %s, %s\n", 
-                  sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&cloud_server_addr), 
+                  sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&admin_server_addr), 
                   strerror(errno));
             goto try_again;
         }
@@ -536,7 +536,7 @@ try_again:
 
             // if dgram is not from server then receive again
             if (fromlen != sizeof(struct sockaddr_in) ||
-                memcmp(&cloud_server_addr, &from, sizeof(from)) != 0) 
+                memcmp(&admin_server_addr, &from, sizeof(from)) != 0) 
             {
                 ERROR("ignoring dgram - from unexpected address\n");
                 continue;

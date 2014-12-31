@@ -79,7 +79,7 @@ int main(int argc, char **argv)
     }
 
     // connect to CAMSERVER
-    sfd = connect_to_cloud_server(user_name, 
+    sfd = connect_to_admin_server(user_name, 
                                   password, 
                                   create_account ? "create" : "login",
                                   &connect_status);

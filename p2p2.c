@@ -74,9 +74,9 @@ static int p2p2_connect(char * user_name, char * password, char * wc_name, int s
     int       tries = 0;
 
 try_again:
-    // connect to cloud_server, with 'wccon' service
+    // connect to admin_server, with 'wccon' service
     sprintf(service, "wccon %s %d", wc_name, service_id);
-    handle = connect_to_cloud_server(user_name, password, service, connect_status);
+    handle = connect_to_admin_server(user_name, password, service, connect_status);
 
     // retry on WC_ADDR_NOT_AVAIL error
     if (handle < 0 && *connect_status == STATUS_ERR_WC_ADDR_NOT_AVAIL && ++tries <= 5) {
@@ -90,7 +90,7 @@ try_again:
             *connect_status = STATUS_ERR_HANDLE_TOO_BIG;
             close(handle);
         }
-        ERROR("unable to connect to cloud_server, %s\n", status2str(*connect_status));
+        ERROR("unable to connect to admin_server, %s\n", status2str(*connect_status));
         return -1;
     }
 

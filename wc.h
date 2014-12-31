@@ -71,14 +71,14 @@ int config_write(char * config_path, config_t * config, int config_version);
 
 // -----------------  WC SERVER -----------------------------------------------------
 
-#define CLOUD_SERVER_HOSTNAME        "sthaid-rs.dyndns.org"
+#define ADMIN_SERVER_HOSTNAME        "sthaid-rs.dyndns.org"
 
-#define CLOUD_SERVER_PORT             80
-#define CLOUD_SERVER_DGRAM_PORT       9001
+#define ADMIN_SERVER_PORT             80
+#define ADMIN_SERVER_DGRAM_PORT       9001
 
-#define CLOUD_SERVER_MAX_NETTEST_BUFF 0x100000 
+#define ADMIN_SERVER_MAX_NETTEST_BUFF 0x100000 
 
-#define CLOUD_SERVER_LOGIN_OK         12345678
+#define ADMIN_SERVER_LOGIN_OK         12345678
 
 #define MAX_USER_WC                   32
 #define MAX_WC_NAME                   32
@@ -89,10 +89,10 @@ int config_write(char * config_path, config_t * config, int config_version);
 #define MIN_PASSWORD                  4
 
 
-#define HTTP_CONNECT_REQ  "CONNECT " CLOUD_SERVER_HOSTNAME ":80 HTTP/1.0\r\n\r\n"
+#define HTTP_CONNECT_REQ  "CONNECT " ADMIN_SERVER_HOSTNAME ":80 HTTP/1.0\r\n\r\n"
 #define HTTP_CONNECT_RESP "HTTP/1.0 200 OK\r\n\r\n"
 
-int connect_to_cloud_server(char * user_name, char * password, char * service, int * connect_status);
+int connect_to_admin_server(char * user_name, char * password, char * service, int * connect_status);
 
 // -----------------  PEER TO PEER COMMUNICATION  ------------------------------------
 

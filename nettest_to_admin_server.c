@@ -80,18 +80,18 @@ void nettest_to_server(char * user_name, char * password)
 {
     int   sfd, len, i;
     long  start1, end1, start2, end2;
-    char  buff[CLOUD_SERVER_MAX_NETTEST_BUFF];
+    char  buff[ADMIN_SERVER_MAX_NETTEST_BUFF];
     int   connect_status;
 
-    // connect to cloud_server
-    sfd = connect_to_cloud_server(user_name, password, "nettest", &connect_status);
+    // connect to admin_server
+    sfd = connect_to_admin_server(user_name, password, "nettest", &connect_status);
     if (sfd == -1) {
         PRINTF("connect to server failed, %s\n", status2str(connect_status));
         exit(1);
     }
 
     // log starting notice
-    PRINTF("Starting network speed test to %s\n", CLOUD_SERVER_HOSTNAME);
+    PRINTF("Starting network speed test to %s\n", ADMIN_SERVER_HOSTNAME);
     PRINTF("\n");
     PRINTF("ClientToServer    ServerToClient\n");
     PRINTF("  (Mbit/Sec)        (Mbit/Sec)  \n");

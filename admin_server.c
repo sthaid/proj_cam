@@ -137,7 +137,7 @@ int main(int argc, char ** argv)
     }
 
     // initialize message logging
-    logmsg_init(debug_mode == 0 ? "cloud_server.log" : "stderr");
+    logmsg_init(debug_mode == 0 ? "admin_server.log" : "stderr");
 
     // call subsystem initialization routines
     INFO("initializing\n");
@@ -188,7 +188,7 @@ void * service_accept_thread(void * cx)
     bzero(&addr,sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htons(INADDR_ANY);
-    addr.sin_port = htons(CLOUD_SERVER_PORT);
+    addr.sin_port = htons(ADMIN_SERVER_PORT);
     ret = bind(listen_sockfd, (struct sockaddr *)&addr, sizeof(addr));
     if (ret == -1) {
         FATAL("bind listen_sockfd\n");
@@ -216,7 +216,7 @@ void * service_accept_thread(void * cx)
         }
         DEBUG("accept from %s on port %d\n", 
               sock_addr_to_str(s,sizeof(s),(struct sockaddr*)&addr),
-              CLOUD_SERVER_PORT);
+              ADMIN_SERVER_PORT);
 
         // read and validate http connect request
         // XXX this needs a timeout
@@ -285,7 +285,7 @@ void * service_accept_thread(void * cx)
             account_create(sockfd, user_name, password);
 
             // write value to socket to indicate the account create succeeded
-            login_okay = CLOUD_SERVER_LOGIN_OK;
+            login_okay = ADMIN_SERVER_LOGIN_OK;
             if (write(sockfd,&login_okay,sizeof(login_okay)) != sizeof(login_okay)) {
                 continue;
             }
@@ -301,7 +301,7 @@ void * service_accept_thread(void * cx)
             }
 
             // write value to socket to indicate login is okay
-            login_okay = CLOUD_SERVER_LOGIN_OK;
+            login_okay = ADMIN_SERVER_LOGIN_OK;
             if (write(sockfd,&login_okay,sizeof(login_okay)) != sizeof(login_okay)) {
                 continue;
             }
@@ -321,7 +321,7 @@ void * service_accept_thread(void * cx)
             }
 
             // write value to socket to indicate login is okay
-            login_okay = CLOUD_SERVER_LOGIN_OK;
+            login_okay = ADMIN_SERVER_LOGIN_OK;
             if (write(sockfd,&login_okay,sizeof(login_okay)) != sizeof(login_okay)) {
                 continue;
             }
@@ -341,7 +341,7 @@ void * service_accept_thread(void * cx)
             }
 
             // write value to socket to indicate login is okay
-            login_okay = CLOUD_SERVER_LOGIN_OK;
+            login_okay = ADMIN_SERVER_LOGIN_OK;
             if (write(sockfd,&login_okay,sizeof(login_okay)) != sizeof(login_okay)) {
                 continue;
             }
@@ -1244,7 +1244,7 @@ bool verify_chars(char * s)
 
 void * nettest_thread(void * cx)
 {
-    char  buff[CLOUD_SERVER_MAX_NETTEST_BUFF];
+    char  buff[ADMIN_SERVER_MAX_NETTEST_BUFF];
     int   len;
     int   sockfd = (long)cx;
 
@@ -1313,7 +1313,7 @@ void * wccon_thread(void * cxarg)
     }
 
     // indicate okay on sockfd 
-    login_okay = CLOUD_SERVER_LOGIN_OK;
+    login_okay = ADMIN_SERVER_LOGIN_OK;
     write(cx->sockfd,&login_okay,sizeof(login_okay));
 
     // add the handle to cx
@@ -1403,7 +1403,7 @@ void * dgram_thread(void * cx)
     bzero(&local_addr,sizeof(local_addr));
     local_addr.sin_family = AF_INET;
     local_addr.sin_addr.s_addr = htons(INADDR_ANY);
-    local_addr.sin_port = htons(CLOUD_SERVER_DGRAM_PORT);
+    local_addr.sin_port = htons(ADMIN_SERVER_DGRAM_PORT);
     ret = bind(sfd,
                (struct sockaddr *)&local_addr,
                sizeof(local_addr));
