@@ -1367,9 +1367,13 @@ void display_handler(void)
                     if (webcam[i].recvd_frames < last_recvd_frames[i]) {
                         last_recvd_frames[i] = webcam[i].recvd_frames;
                     }
-                    sprintf(static_str[i], "%c %0.1f", 
-                            'A'+i,
-                            (double)(webcam[i].recvd_frames - last_recvd_frames[i]) * 1000000 / delta_us);
+                    if (webcam[i].state == STATE_CONNECTED) {
+                        sprintf(static_str[i], "%c %0.1f", 
+                                'A'+i,
+                                (double)(webcam[i].recvd_frames - last_recvd_frames[i]) * 1000000 / delta_us);
+                    } else {
+                        sprintf(static_str[i], "%c not conn", 'A'+i);
+                    }
                     last_recvd_frames[i] = webcam[i].recvd_frames;
                 }
                 last_us = curr_us;
@@ -1385,7 +1389,11 @@ void display_handler(void)
         case 1: {  // TOTAL MB
             render_text(&ctlbpane, 0, 0, "TOTAL MB", MOUSE_EVENT_STATUS_SELECT);
             for (i = 0; i < MAX_WEBCAM; i++) {
-                sprintf(str, "%c %3d", 'A'+i, (int)(webcam[i].recvd_bytes/1000000));
+                if (webcam[i].state == STATE_CONNECTED) {
+                    sprintf(str, "%c %d", 'A'+i, (int)(webcam[i].recvd_bytes/1000000));
+                } else {
+                    sprintf(str, "%c not conn", 'A'+i);
+                }
                 render_text(&ctlbpane, i+1, 0, str, MOUSE_EVENT_NONE);
             }
             break; }
@@ -1393,11 +1401,15 @@ void display_handler(void)
         case 2: {  // NETWORK
             render_text(&ctlbpane, 0, 0, "NETWORK", MOUSE_EVENT_STATUS_SELECT);
             for (i = 0; i < MAX_WEBCAM; i++) {
-                sprintf(str, "%c %d %4d %4d",
-                        'A'+i, 
-                        webcam[i].p2p_id,
-                        webcam[i].status.p2p_resend_cnt,
-                        webcam[i].status.p2p_recvdup_cnt);
+                if (webcam[i].state == STATE_CONNECTED) {
+                    sprintf(str, "%c %d %4d %4d",
+                            'A'+i, 
+                            webcam[i].p2p_id,
+                            webcam[i].status.p2p_resend_cnt,
+                            webcam[i].status.p2p_recvdup_cnt);
+                } else {
+                    sprintf(str, "%c not conn", 'A'+i);
+                }
                 render_text(&ctlbpane, i+1, 0, str, MOUSE_EVENT_NONE);
             }
             break; }
