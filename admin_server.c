@@ -1,7 +1,6 @@
 #include "wc.h"
 
 // TBD - is any locking required
-// TBD LATER - send error response back to DGRAM_ID_CONNECT_REQ
 
 //
 // defines
@@ -44,34 +43,27 @@ typedef struct {
     uint64_t last_announce_rcv_time_us;
 } onl_wc_t;
 
-typedef struct {
-    char user_name[32];
-    char password[32];
-    char service[32];
-    int  sockfd;
-    int  handle;
-} wccon_cx_t;
-
 //
 // variables
 //
 
-user_t        user[MAX_USER];
-int           max_user;
-onl_wc_t     onl_wc[MAX_ONL_WC];
-int           max_onl_wc;
-int           debug_mode;
-__thread bool is_root;
+user_t           user[MAX_USER];
+int              max_user;
+onl_wc_t         onl_wc[MAX_ONL_WC];
+int              max_onl_wc;
+int              debug_mode;
+__thread bool    is_root;
+p2p_routines_t * p2p = &p2p1;
 
 //
 // prototypes
 //
 
-void * service_accept_thread(void * arg);
+void * service_thread(void * cx);
 void account_init(void);
-void account_create(int sockfd, char * user_name, char * password);
-void * account_login_thread(void * cx);
-void * account_command_thread(void * cx);
+int account_create(char * user_name, char * password);
+void account_login(int sockfd, user_t * u);
+void account_command(int sockfd, user_t * u);
 void cmd_processor(user_t * u, FILE * fp, bool single_cmd);
 bool cmd_help(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_add_wc(user_t * u, FILE * fp, int argc, char ** argv);
@@ -92,13 +84,13 @@ bool getcl(FILE * fp, char * b, int * argc, char ** argv);
 void prcl(FILE * fp, char * fmt, ...) __attribute__ ((format (printf, 2, 3)));
 void display_user(FILE * fp, user_t * u);
 void display_wc(FILE * fp, char * wc_macaddr, user_t * u, int u_wc_idx);
-int verify_user_name_and_password(char * user_name, char *password);
+user_t *  verify_user_name_and_password(char * user_name, char *password);
 bool verify_wc_macaddr(char * wc_macaddr);
 bool verify_wc_name(char * wc_name);
 bool verify_chars(char * s);
-void * nettest_thread(void * cx);
+void nettest(int sockfd);
+void wccon(int sockfd, int handle); 
 void * wccon_thread(void * cxarg);
-void * wccon2_thread(void * cxarg);
 void dgram_init(void);
 void * dgram_thread(void * cx);
 void * dgram_monitor_onl_wc_thread(void * cx);
@@ -108,10 +100,12 @@ uint64_t gen_con_id(void);
 
 int main(int argc, char ** argv)
 {
-    struct rlimit rl;
-    pthread_t     thread;
-    int           ret;
-    char          opt_char;
+    struct rlimit      rl;
+    char               opt_char;
+    int                ret, listen_sockfd, sockfd;
+    pthread_t          thread;
+    socklen_t          addrlen;
+    struct sockaddr_in addr;
 
     // set resource limti to allow core dumps
     rl.rlim_cur = RLIM_INFINITY;
@@ -144,47 +138,17 @@ int main(int argc, char ** argv)
     account_init();
     dgram_init();
 
-    // create service_accept_thread
-    pthread_create(&thread, NULL, service_accept_thread, NULL);
-
-    // pause forever
-    INFO("startup complete\n");
-    while (true) {
-        pause();
-    }
-
-    // return;
-    INFO("shutdown\n");
-    return 0;
-}
-
-void * service_accept_thread(void * cx)
-{
-    int                listen_sockfd;
-    int                ret, sockfd=-1, len, i, login_okay;
-    socklen_t          addrlen;
-    struct sockaddr_in addr;
-    char               s[100];
-    char               login[96];
-    char             * user_name;
-    char             * password;
-    char             * service;
-    pthread_t          thread;
-    char               http_connect_req[sizeof(HTTP_CONNECT_REQ)];
-
-    // detach because this thread will not be joined
-    pthread_detach(pthread_self());
-
-    // create socket
+    // create listen socket, and
+    // set socket option SO_REUSEADDR; and
+    // bind socket; and
+    // listen on socket
     listen_sockfd = socket(AF_INET, SOCK_STREAM|SOCK_CLOEXEC, 0);
     if (listen_sockfd == -1) {
         FATAL("socket listen_sockfd\n");
     }
 
-    // set option SO_REUSEADDR
     set_sock_opts(listen_sockfd, 1, -1, -1, -1);
 
-    // bind socket
     bzero(&addr,sizeof(addr));
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = htons(INADDR_ANY);
@@ -194,7 +158,6 @@ void * service_accept_thread(void * cx)
         FATAL("bind listen_sockfd\n");
     }
     
-    // listen 
     ret = listen(listen_sockfd, 50);
     if (ret == -1) {
         FATAL("listen\n");
@@ -202,11 +165,6 @@ void * service_accept_thread(void * cx)
 
     // loop, accepting connection, and create thread to service the client
     while (true) {
-        // close sockfd if it was left open
-        if (sockfd != -1) {
-            close(sockfd);
-        }
-
         // accept connection
         addrlen = sizeof(addr);
         sockfd = accept4(listen_sockfd, (struct sockaddr *) &addr, &addrlen, SOCK_CLOEXEC);
@@ -218,163 +176,143 @@ void * service_accept_thread(void * cx)
               sock_addr_to_str(s,sizeof(s),(struct sockaddr*)&addr),
               ADMIN_SERVER_PORT);
 
-        // read and validate http connect request
-        // XXX this needs a timeout
-        // XXX and maybe this should be a thread already
-        // XXX delay when password validation fails
-        bzero(http_connect_req, sizeof(http_connect_req));
-        set_sock_opts(sockfd, -1, -1, -1, 1000000);
-        len = recv(sockfd, http_connect_req, sizeof(http_connect_req)-1, MSG_WAITALL);
-        set_sock_opts(sockfd, -1, -1, -1, 0);
-        if (len != sizeof(http_connect_req)-1) {
-            ERROR("reading http connect request, len=%d, %s\n", len, strerror(errno));
-            continue;
-        }
-        if (strcmp(http_connect_req, HTTP_CONNECT_REQ) != 0) {
-            ERROR("invalid http connect request, '%s'\n", http_connect_req);
-            continue;
-        }
-
-        // send http connect response
-        len = write(sockfd, HTTP_CONNECT_RESP, sizeof(HTTP_CONNECT_RESP)-1);
-        if (len != sizeof(HTTP_CONNECT_RESP)-1) {
-            ERROR("sending http connect response, %s\n", strerror(errno));
-            continue;
-        }
-
-        // read 96 bytes which contain the user_name,password,service
-        set_sock_opts(sockfd, -1, -1, -1, 1000000);
-        len = recv(sockfd, login, sizeof(login), MSG_WAITALL);
-        set_sock_opts(sockfd, -1, -1, -1, 0);
-        if (len != sizeof(login)) {
-            ERROR("read of login info\n");
-            continue;
-        }
-        login[sizeof(login)-1] = '\0';
-        user_name = login;
-        password  = login+32;
-        service   = login+64;
-
-        // if service is 'create' then 
-        if (strcmp(service, "create") == 0) {
-            // verify user_name and password length, and character set
-            if (strlen(user_name) > MAX_USER_NAME || strlen(user_name) < MIN_USER_NAME) {
-                sprintf(s,"status=%d", STATUS_ERR_USER_NAME_LENGTH);
-                write(sockfd,s,strlen(s));
-                continue;
-            }
-            if (strlen(password) > MAX_PASSWORD || strlen(password) < MIN_PASSWORD) {
-                sprintf(s,"status=%d", STATUS_ERR_PASSWORD_LENGTH);
-                write(sockfd,s,strlen(s));
-                continue;
-            }
-            if (!verify_chars(user_name)) {
-                sprintf(s,"status=%d", STATUS_ERR_USER_NAME_CHARS);
-                write(sockfd,s,strlen(s));
-                continue;
-            }
-            if (!verify_chars(password)) {
-                sprintf(s,"status=%d", STATUS_ERR_PASSWORD_CHARS);
-                write(sockfd,s,strlen(s));
-                continue;
-            }
-
-            // XXX this needs to follow the login sequence
-
-            // call account_create, no thread used for account_create
-            account_create(sockfd, user_name, password);
-
-            // write value to socket to indicate the account create succeeded
-            login_okay = ADMIN_SERVER_LOGIN_OK;
-            if (write(sockfd,&login_okay,sizeof(login_okay)) != sizeof(login_okay)) {
-                continue;
-            }
-
-        // if service is 'login' then
-        } else if (strcmp(service, "login") == 0) {
-            // verify user_name and verify password, returns -1 or user tbl idx
-            i = verify_user_name_and_password(user_name, password);
-            if (i == -1) {
-                sprintf(s,"status=%d", STATUS_ERR_INVALID_USER_OR_PASSWD);
-                write(sockfd,s,strlen(s));
-                continue;
-            }
-
-            // write value to socket to indicate login is okay
-            login_okay = ADMIN_SERVER_LOGIN_OK;
-            if (write(sockfd,&login_okay,sizeof(login_okay)) != sizeof(login_okay)) {
-                continue;
-            }
-
-            // create account_login_thread
-            pthread_create(&thread, NULL, account_login_thread, (void*)(((long)sockfd << 16) | i));
-            sockfd = -1;
-
-        // if service is 'command' then
-        } else if (strcmp(service, "command") == 0) {
-            // verify user_name and verify password, returns -1 or user tbl idx
-            i = verify_user_name_and_password(user_name, password);
-            if (i == -1) {
-                sprintf(s,"status=%d", STATUS_ERR_INVALID_USER_OR_PASSWD);
-                write(sockfd,s,strlen(s));
-                continue;
-            }
-
-            // write value to socket to indicate login is okay
-            login_okay = ADMIN_SERVER_LOGIN_OK;
-            if (write(sockfd,&login_okay,sizeof(login_okay)) != sizeof(login_okay)) {
-                continue;
-            }
-
-            // create account_command_thread
-            pthread_create(&thread, NULL, account_command_thread, (void*)(((long)sockfd << 16) | i));
-            sockfd = -1;
-
-        // if service is 'nettest' then
-        } else if (strcmp(service, "nettest") == 0) {
-            // verify user_name and verify password, returns -1 or user tbl idx
-            i = verify_user_name_and_password(user_name, password);
-            if (i == -1) {
-                sprintf(s,"status=%d", STATUS_ERR_INVALID_USER_OR_PASSWD);
-                write(sockfd,s,strlen(s));
-                continue;
-            }
-
-            // write value to socket to indicate login is okay
-            login_okay = ADMIN_SERVER_LOGIN_OK;
-            if (write(sockfd,&login_okay,sizeof(login_okay)) != sizeof(login_okay)) {
-                continue;
-            }
-
-            // create nettest_thread
-            pthread_create(&thread, NULL, nettest_thread, (void*)(long)sockfd);
-            sockfd = -1;
-
-        // if service is 'wccon' then 
-        } else if (strncmp(service, "wccon", 5) == 0) {
-            wccon_cx_t * wccon_cx;
-
-            // note: in this case the the verification ard performed by the wccon_thread, and 
-            // the login_okay is sent by the wccon_thread 
-
-            // allocate and init cx
-            wccon_cx = calloc(1,sizeof(wccon_cx_t));
-            strcpy(wccon_cx->user_name, user_name);
-            strcpy(wccon_cx->password, password);
-            strcpy(wccon_cx->service, service);
-            wccon_cx->sockfd = sockfd;
-
-            // create wccon thread
-            pthread_create(&thread, NULL, wccon_thread, wccon_cx);
-            sockfd = -1;
-
-        // invalid service
-        } else {
-            sprintf(s,"status=%d", STATUS_ERR_INVALID_SERVICE);
-            write(sockfd,s,strlen(s));
-        }
+        // create thread to service the connection
+        pthread_create(&thread, NULL, service_thread, (void*)(long)sockfd);
     }
 
+    // return
+    INFO("shutdown\n");
+    return 0;
+}
+
+void * service_thread(void * cx)
+{
+    #define VERIFY_USERNAME_AND_PASSWORD() \
+        do { \
+            u = verify_user_name_and_password(user_name, password); \
+            if (u == NULL) { \
+                REPLY_ERROR(STATUS_ERR_INVALID_USER_OR_PASSWD); \
+                goto done; \
+            } \
+        } while (0)
+
+    #define REPLY_ERROR(stat) \
+        do { \
+            char s[100]; \
+            sprintf(s,"status=%d", (stat)); \
+            write(sockfd,s,strlen(s)); \
+        } while (0)
+
+    #define REPLY_LOGIN_OK() \
+        do { \
+            int login_okay = ADMIN_SERVER_LOGIN_OK; \
+            write(sockfd,&login_okay,sizeof(login_okay)); \
+        } while (0)
+
+    int      sockfd = (long)cx;
+    char     http_connect_req[sizeof(HTTP_CONNECT_REQ)];
+    char     login[96];
+    char   * user_name;
+    char   * password;
+    char   * service;
+    user_t * u;
+    int      len;
+
+    // detach because this thread will not be joined
+    pthread_detach(pthread_self());
+
+    // read and validate http connect request;
+    // with 5 sec tout
+    bzero(http_connect_req, sizeof(http_connect_req));
+    set_sock_opts(sockfd, -1, -1, -1, 5000000);
+    len = recv(sockfd, http_connect_req, sizeof(http_connect_req)-1, MSG_WAITALL);
+    set_sock_opts(sockfd, -1, -1, -1, 0);
+    if (len != sizeof(http_connect_req)-1) {
+        ERROR("reading http connect request, len=%d, %s\n", len, strerror(errno));
+        goto done;
+    }
+    if (strcmp(http_connect_req, HTTP_CONNECT_REQ) != 0) {
+        ERROR("invalid http connect request, '%s'\n", http_connect_req);
+        goto done;
+    }
+
+    // send http connect response
+    write(sockfd, HTTP_CONNECT_RESP, sizeof(HTTP_CONNECT_RESP)-1);
+
+    // read 96 bytes which contain the user_name,password,service;
+    // with 5 sec tout
+    set_sock_opts(sockfd, -1, -1, -1, 5000000);
+    len = recv(sockfd, login, sizeof(login), MSG_WAITALL);
+    set_sock_opts(sockfd, -1, -1, -1, 0);
+    if (len != sizeof(login)) {
+        ERROR("read of login info\n");
+        goto done;
+    }
+    login[sizeof(login)-1] = '\0';
+    user_name = login;
+    password  = login+32;
+    service   = login+64;
+
+    // process 0the service request
+    if (strcmp(service, "create") == 0) {
+        int  status;
+        char s[100];
+
+        status = account_create(user_name, password);
+        if (status != STATUS_INFO_OK) {
+            REPLY_ERROR(status);
+            goto done;
+        }
+        REPLY_LOGIN_OK();
+        sprintf(s,"account %s created\n\n", user_name);
+        write(sockfd, s, strlen(s));
+
+    } else if (strcmp(service, "login") == 0) {
+        VERIFY_USERNAME_AND_PASSWORD();
+        REPLY_LOGIN_OK();
+        account_login(sockfd, u);
+        sockfd = -1;  // closed by above call
+
+    } else if (strcmp(service, "command") == 0) {
+        VERIFY_USERNAME_AND_PASSWORD();
+        REPLY_LOGIN_OK();
+        account_command(sockfd, u);
+        sockfd = -1;  // closed by above call
+
+    } else if (strcmp(service, "nettest") == 0) {
+        VERIFY_USERNAME_AND_PASSWORD();
+        REPLY_LOGIN_OK();
+        nettest(sockfd);
+
+    } else if (strncmp(service, "wccon", 5) == 0) {
+        char wc_name[100];
+        int  service_id, status, handle;
+
+        VERIFY_USERNAME_AND_PASSWORD();
+        if (sscanf(service, "wccon %s %d", wc_name, &service_id) != 2) {
+            REPLY_ERROR(STATUS_ERR_INVALID_SERVICE);
+            goto done;
+        }
+        handle = p2p_connect(user_name, password, wc_name, service_id, &status);
+        if (handle < 0) {
+            REPLY_ERROR(status);
+            goto done;
+        }
+        REPLY_LOGIN_OK();
+        wccon(sockfd, handle);
+
+    } else {
+        VERIFY_USERNAME_AND_PASSWORD();
+        REPLY_ERROR(STATUS_ERR_INVALID_SERVICE);
+        goto done;
+    }
+
+    // close sockat and exit thread
+done:
+    if (sockfd != -1) {
+        close(sockfd);
+        sockfd = -1;
+    }
     return NULL;
 }
 
@@ -403,26 +341,29 @@ void account_init(void)
     }
 }
 
-void account_create(int sockfd, char * user_name, char * password)
+int account_create(char * user_name, char * password)
 {
-    FILE    * fp;
-    user_t  * u;
-    int       i;
+    user_t * u;
+    int      i;
     
-    // assoiciate fp with the sockfd, in read/write mode
-    fp = fdopen(sockfd, "w+");  // mode: read/write
-    if (fp == NULL) {
-        ERROR("fdopen\n");
-        close(sockfd);
-        goto done;
+    // verify user_name and password length, and character set
+    if (strlen(user_name) > MAX_USER_NAME || strlen(user_name) < MIN_USER_NAME) {
+        return STATUS_ERR_USERNAME_LENGTH;
     }
-    setlinebuf(fp);
+    if (strlen(password) > MAX_PASSWORD || strlen(password) < MIN_PASSWORD) {
+        return STATUS_ERR_PASSWORD_LENGTH;
+    }
+    if (!verify_chars(user_name)) {
+        return STATUS_ERR_USERNAME_CHARS;
+    }
+    if (!verify_chars(password)) {
+        return STATUS_ERR_PASSWORD_CHARS;
+    }
 
     // if user_name already exists then error
     for (i = 0; i < max_user; i++) {
         if (strcmp(user[i].user_name, user_name) == 0) {
-            prcl(fp, "error: user_name %s already exists\n", user_name);
-            goto done;
+            return STATUS_ERR_USERNAME_ALREADY_EXISTS;
         }
     }
 
@@ -433,8 +374,7 @@ void account_create(int sockfd, char * user_name, char * password)
         }
     }
     if (i == MAX_USER) {
-        prcl(fp, "error: no space to add user\n");
-        goto done;
+        return STATUS_ERR_TOO_MANY_USERS;        
     }
     u = &user[i];
     bzero(u,sizeof(user_t));
@@ -449,36 +389,23 @@ void account_create(int sockfd, char * user_name, char * password)
     
     // create user file
     if (!create_user_file(u)) {
-        prcl(fp, "error: failed to save account information\n");
-        goto done;
+        return STATUS_ERR_CREATE_USER_PROFILE;
     }
 
-    // print success message, and
-    prcl(fp, "account %s created\n\n", user_name);
-
-done:
-    // done
-    fclose(fp);
+    // return success
+    return STATUS_INFO_OK;
 }
 
-void * account_login_thread(void * cx)
+void account_login(int sockfd, user_t * u)
 {
-    FILE   * fp;
-    user_t * u;
-    int      user_idx, sockfd;
+    FILE  * fp;
 
-    // detach because this thread will not be joined
-    pthread_detach(pthread_self());
-
-    // init
-    user_idx = (long)cx & 0xffff;
-    sockfd = (long)cx >> 16;
-    u = &user[user_idx];
+    // associate fp with sockfd
     fp = fdopen(sockfd, "w+");   // mode: read/write
     if (fp == NULL) {
         ERROR("fdopen\n");
         close(sockfd);
-        return NULL;
+        return;
     }
     setlinebuf(fp);
 
@@ -488,29 +415,20 @@ void * account_login_thread(void * cx)
     // call cmd_processor
     cmd_processor(u, fp, false);
 
-    // done
+    // close stream, this also closes sockfd
     fclose(fp);
-    return NULL;
 }
 
-void * account_command_thread(void * cx)
+void account_command(int sockfd, user_t * u)
 {
-    FILE   * fp;
-    user_t * u;
-    int      user_idx, sockfd;
+    FILE * fp;
 
-    // detach because this thread will not be joined
-    pthread_detach(pthread_self());
-
-    // init
-    user_idx = (long)cx & 0xffff;
-    sockfd = (long)cx >> 16;
-    u = &user[user_idx];
+    // associate fp with sockfd
     fp = fdopen(sockfd, "w+");   // mode: read/write
     if (fp == NULL) {
         ERROR("fdopen\n");
         close(sockfd);
-        return NULL;
+        return;
     }
     setlinebuf(fp);
 
@@ -520,9 +438,8 @@ void * account_command_thread(void * cx)
     // call cmd_processor
     cmd_processor(u, fp, true);
 
-    // done
+    // close stream, this also closes sockfd
     fclose(fp);
-    return NULL;
 }
 
 typedef struct {
@@ -1192,7 +1109,7 @@ void display_wc(FILE * fp, char * wc_macaddr, user_t * u, int u_wc_idx)
          online_wc_addr_behind_nat_str);
 }
 
-int verify_user_name_and_password(char * user_name, char *password) 
+user_t * verify_user_name_and_password(char * user_name, char *password) 
 {
     int i;
 
@@ -1203,16 +1120,16 @@ int verify_user_name_and_password(char * user_name, char *password)
         }
     }
     if (i == max_user) {
-        return -1;
+        return NULL;
     }
 
     // validate password
     if (strcmp(user[i].password, password) != 0) {
-        return -1;
+        return NULL;
     }
 
-    // success, return user table idx
-    return i;
+    // success
+    return &user[i];
 }
 
 bool verify_wc_macaddr(char * wc_macaddr)
@@ -1242,14 +1159,10 @@ bool verify_chars(char * s)
 
 // ----------------- SERVICE - NETWORDK SPEED TEST  ----------------
 
-void * nettest_thread(void * cx)
+void nettest(int sockfd) 
 {
     char  buff[ADMIN_SERVER_MAX_NETTEST_BUFF];
     int   len;
-    int   sockfd = (long)cx;
-
-    // detach because this thread will not be joined
-    pthread_detach(pthread_self());
 
     // loop, reading and writing back a buffer, the client decides when to stop
     while (true) {
@@ -1271,60 +1184,29 @@ void * nettest_thread(void * cx)
     }
 
 done:
-    // done with test, close socket
-    close(sockfd);
-    return NULL;
+    return;
 }
 
-// ----------------- SERVICE - WCICE CONNECT  ---------------------
+// ----------------- SERVICE - WCCON CONNECT  ---------------------
 
-p2p_routines_t * p2p = &p2p1;
+typedef struct {
+    int sockfd;
+    int handle;
+} wccon_cx_t;
 
-void * wccon_thread(void * cxarg)
+void wccon(int sockfd, int handle)  
 {
-    wccon_cx_t * cx = cxarg;
-    int login_okay, cnt, handle, len, service_id, rc, connect_status;
-    char wc_name[100];
+    int len, rc;
     char buff[50000];
-    char s[100];
-    pthread_t wccon2_thread_id;
+    pthread_t thread;
+    wccon_cx_t cx = {sockfd, handle};
 
-    // format of cx->service:  'wccon <wc_name> <service_id>'
-
-    // detach because this thread will not be joined
-    pthread_detach(pthread_self());
-
-    // get the wc_name and service_id from cx->service
-    cnt = sscanf(cx->service, "wccon %s %d", wc_name, &service_id);
-    if (cnt != 2) {
-        sprintf(s,"status=%d", STATUS_ERR_INVALID_SERVICE);
-        write(cx->sockfd,s,strlen(s));
-        free(cx);
-        return NULL;
-    }
-
-    // connect to webcam
-    handle = p2p_connect(cx->user_name, cx->password, wc_name, service_id, &connect_status);
-    if (handle < 0) {
-        sprintf(s,"status=%d", connect_status);
-        write(cx->sockfd,s,strlen(s));
-        free(cx);
-        return NULL;
-    }
-
-    // indicate okay on sockfd 
-    login_okay = ADMIN_SERVER_LOGIN_OK;
-    write(cx->sockfd,&login_okay,sizeof(login_okay));
-
-    // add the handle to cx
-    cx->handle = handle;
-
-    // create thread
-    pthread_create(&wccon2_thread_id, NULL, wccon2_thread, cx);
+    // create thread to read from the webcam and write to the socket
+    pthread_create(&thread, NULL, wccon_thread, &cx);
 
     // read from sockfd and write to webcam
     while (true) {
-        if ((len = read(cx->sockfd, buff, sizeof(buff))) <= 0) {
+        if ((len = read(sockfd, buff, sizeof(buff))) <= 0) {
             break;
         }
         if ((rc = p2p_send(handle, buff, len)) != len) {
@@ -1333,20 +1215,14 @@ void * wccon_thread(void * cxarg)
     }
 
     // disconnect from webcam, 
-    // the sockfd is closed in wccon2_thread
+    // the sockfd is closed in wccon_thread
     p2p_disconnect(handle);
 
-    // waith for wccon2_thread to exit
-    pthread_join(wccon2_thread_id, NULL);
-
-    // free cx
-    free(cx);
-
-    // exit thread
-    return NULL;
+    // waith for wccon_thread to exit
+    pthread_join(thread, NULL);
 }
 
-void * wccon2_thread(void *cxarg)
+void * wccon_thread(void *cxarg)
 {
     wccon_cx_t * cx = cxarg;
     char buff[50000];
@@ -1362,9 +1238,8 @@ void * wccon2_thread(void *cxarg)
         }
     }
 
-    // close sockfd
+    // shutdown the socket
     shutdown(cx->sockfd, SHUT_RDWR);
-    close(cx->sockfd);
 
     // exit thread
     return NULL;
@@ -1536,13 +1411,12 @@ void * dgram_thread(void * cx)
                    SERVICE_STR(dgram_rcv.u.connect_req.service));
 
             // verify supplied user/password
-            i = verify_user_name_and_password(dgram_rcv.u.connect_req.user_name, dgram_rcv.u.connect_req.password);
-            if (i == -1) {
+            u = verify_user_name_and_password(dgram_rcv.u.connect_req.user_name, dgram_rcv.u.connect_req.password);
+            if (u == NULL) {
                 ERROR("invalid user_name or password\n");
                 status = STATUS_ERR_INVALID_USER_OR_PASSWD;
                 goto connect_reject;
             }
-            u = &user[i];
 
             // find the wc_name in the user wc table
             for (i = 0; i < MAX_USER_WC; i++) {

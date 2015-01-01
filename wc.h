@@ -346,15 +346,18 @@ typedef struct {
 #define STATUS_ERR_NO_RESPONSE_FROM_PEER     134
 #define STATUS_ERR_SERVER_CONNECT            135
 #define STATUS_ERR_INVALID_LOGIN_RESPONSE    136
-#define STATUS_ERR_USER_NAME_LENGTH          137
+#define STATUS_ERR_USERNAME_LENGTH           137
 #define STATUS_ERR_PASSWORD_LENGTH           138
-#define STATUS_ERR_USER_NAME_CHARS           139
+#define STATUS_ERR_USERNAME_CHARS            139
 #define STATUS_ERR_PASSWORD_CHARS            140
 #define STATUS_ERR_INVALID_USER_OR_PASSWD    141
 #define STATUS_ERR_INVALID_SERVICE           142
 #define STATUS_ERR_WC_DOES_NOT_EXIST         143
 #define STATUS_ERR_WC_NOT_ONLINE             144
 #define STATUS_ERR_WC_ADDR_NOT_AVAIL         145
+#define STATUS_ERR_USERNAME_ALREADY_EXISTS   146
+#define STATUS_ERR_TOO_MANY_USERS            147
+#define STATUS_ERR_CREATE_USER_PROFILE       148
 
 #define STATUS_STR(status) \
     ((status) == STATUS_INFO_OK                       ? "OK"                      : \
@@ -401,15 +404,18 @@ typedef struct {
      (status) == STATUS_ERR_NO_RESPONSE_FROM_PEER     ? "NO_RESPONSE_FROM_PEER"   : \
      (status) == STATUS_ERR_SERVER_CONNECT            ? "SERVER_CONNECT"          : \
      (status) == STATUS_ERR_INVALID_LOGIN_RESPONSE    ? "INVALID_LOGIN_RESPONSE"  : \
-     (status) == STATUS_ERR_USER_NAME_LENGTH          ? "USER_NAME_LENGTH"        : \
+     (status) == STATUS_ERR_USERNAME_LENGTH           ? "USERNAME_LENGTH"         : \
      (status) == STATUS_ERR_PASSWORD_LENGTH           ? "PASSWORD_LENGTH"         : \
-     (status) == STATUS_ERR_USER_NAME_CHARS           ? "USER_NAME_CHARS"         : \
+     (status) == STATUS_ERR_USERNAME_CHARS            ? "USERNAME_CHARS"          : \
      (status) == STATUS_ERR_PASSWORD_CHARS            ? "PASSWORD_CHARS"          : \
-     (status) == STATUS_ERR_INVALID_USER_OR_PASSWD    ? "ACCESS_DENIED"            : \
+     (status) == STATUS_ERR_INVALID_USER_OR_PASSWD    ? "ACCESS_DENIED"           : \
      (status) == STATUS_ERR_INVALID_SERVICE           ? "INVALID_SERVICE"         : \
      (status) == STATUS_ERR_WC_DOES_NOT_EXIST         ? "WC_DOES_NOT_EXIST"       : \
      (status) == STATUS_ERR_WC_NOT_ONLINE             ? "WC_NOT_ONLINE"           : \
      (status) == STATUS_ERR_WC_ADDR_NOT_AVAIL         ? "WC_ADDR_NOT_AVAIL"       : \
+     (status) == STATUS_ERR_USERNAME_ALREADY_EXISTS   ? "USERNAME_ALREADY_EXISTS" : \
+     (status) == STATUS_ERR_TOO_MANY_USERS            ? "TOO_MANY_USERS"          : \
+     (status) == STATUS_ERR_CREATE_USER_PROFILE       ? "CREATE_USER_PROFILE"     : \
                                                         "????")
 
 // mode values
