@@ -76,6 +76,7 @@ bool cmd_delete_account(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_version(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_exit(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_su(user_t * u, FILE * fp, int argc, char ** argv);
+bool cmd_set_password(user_t * u, FILE * fp, int argc, char ** argv);
 void read_all_user_files(void);
 bool create_user_file(user_t * u);
 bool update_user_file(user_t * u);
@@ -477,6 +478,8 @@ cmd_tbl_t cmd_tbl[] = {
     // the following cmds are root only
     { "su", cmd_su, 1, 1, true,
       "su <user> - switch user" },
+    { "set_password", cmd_set_password, 1, 1, true,
+      "set_password <new_password> - set password" },
             };
 
 #define MAX_CMD_TBL (sizeof(cmd_tbl) / sizeof(cmd_tbl[0]))
@@ -550,9 +553,7 @@ bool cmd_help(user_t * u, FILE * fp, int argc, char ** argv)
     // display help 
     for (i = 0; i < MAX_CMD_TBL; i++) {
         if (is_root || !cmd_tbl[i].root_cmd) {
-            prcl(fp, "%s: %s\n", 
-                 cmd_tbl[i].name,
-                 cmd_tbl[i].description);
+            prcl(fp, "%s\n", cmd_tbl[i].description);
         }
     }
 
@@ -700,10 +701,12 @@ bool cmd_ls(user_t * u, FILE * fp, int argc, char ** argv)
         display_user(fp,u);
     } else if (strcmp(argv[0], "*") == 0) {
         for (i = 0; i < max_user; i++) {
-            if (user[i].user_name[0] == '\0') {
+            if (user[i].user_name[0] == '\0' || IS_ROOT(&user[i])) {
                 continue;
             }
+            prcl(fp, "USER: %s\n", user[i].user_name);
             display_user(fp,&user[i]);
+            prcl(fp, "\n");
         }
     } else {
         for (i = 0; i < max_user; i++) {
@@ -736,7 +739,6 @@ bool cmd_ls_onl_wc(user_t * u, FILE * fp, int argc, char ** argv)
 
     return false;
 }
-
 
 // password <curr_passwd> <new_passwd> - change password
 bool cmd_password(user_t * u, FILE * fp, int argc, char ** argv) 
@@ -804,6 +806,8 @@ bool cmd_exit(user_t * u, FILE * fp, int argc, char ** argv)
     return true;
 }
 
+// -- the following commands can be executed only by root --
+
 // su <user> - switch user
 bool cmd_su(user_t * u, FILE * fp, int argc, char ** argv)
 {
@@ -825,6 +829,34 @@ bool cmd_su(user_t * u, FILE * fp, int argc, char ** argv)
     cmd_processor(&user[i], fp, false);
 
     // return, no-logout
+    return false;
+}
+
+// set_password <new_password> - set password
+bool cmd_set_password(user_t * u, FILE * fp, int argc, char ** argv) 
+{
+    char * new_passwd = argv[0];
+
+    // validate new_password
+    if (strlen(new_passwd) > MAX_PASSWORD || strlen(new_passwd) < MIN_PASSWORD) {
+        prcl(fp, "error: new_password length, must be %d-%d chars\n",
+             MIN_PASSWORD, MAX_PASSWORD);
+        return false;
+    }
+    if (!verify_chars(new_passwd)) {
+        prcl(fp, "error: new_password must only contain alphanumeric and '_' chars\n");
+        return false;
+    }
+
+    // set new_password and write user file
+    strcpy(u->password, new_passwd);
+    if (!update_user_file(u)) {
+        prcl(fp, "error: failed to save new password\n");
+        return false;
+    }
+
+    // return no-logout
+    prcl(fp, "password has been changed for user %s\n", u->user_name);
     return false;
 }
 
