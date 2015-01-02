@@ -336,9 +336,6 @@ int main(int argc, char **argv)
         WARN("setrlimit for core dump, %s\n", strerror(errno));
     }
 
-    // init real time clock
-    real_time_init();
-
     // read viewer config
 #ifndef ANDROID
     config_dir = getenv("HOME");
@@ -355,6 +352,12 @@ int main(int argc, char **argv)
     if (config_read(config_path, config, config_version) < 0) {
         FATAL("config_read failed for %s\n", config_path);
     }
+
+    // init logging
+    logmsg_init(CONFIG_DEBUG == 'Y' ? "stderr" : "none");
+
+    // init real time clock
+    real_time_init();
 
     // call server_check to verify login to admin server, and 
     // get the list of webcams owned by this user
@@ -1268,7 +1271,6 @@ void display_handler(void)
     // ---- (except in config mode) ----
     // ---------------------------------
 
-    // XXX also add set time
     if (mode.mode == MODE_PLAYBACK && !config_mode) {
         // Ctl Pane ...
         //
@@ -1345,7 +1347,6 @@ void display_handler(void)
     // CONFIG  QUIT    
 
     // status display
-    // ZZZ some say "not conn" and others don't
     if ((mode.mode == MODE_LIVE) || (mode.mode == MODE_PLAYBACK)) {
         switch (status_select) {
 

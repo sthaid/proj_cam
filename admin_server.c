@@ -265,7 +265,7 @@ void * service_thread(void * cx)
             goto done;
         }
         REPLY_LOGIN_OK();
-        sprintf(s,"account %s created\n\n", user_name);
+        sprintf(s,"account %s created\n", user_name);
         write(sockfd, s, strlen(s));
 
     } else if (strcmp(service, "login") == 0) {

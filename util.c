@@ -112,7 +112,7 @@ int connect_to_admin_server(char * user_name, char * password, char * service, i
     if (ret == -1) {
         ERROR("connect, %s\n", strerror(errno));
         close(sfd);
-        *connect_status = STATUS_ERR_SERVER_CONNECT;
+        *connect_status = STATUS_ERR_FAILED_CONNECT_TO_SERVER;
         return -1;
     }
 
@@ -121,7 +121,7 @@ int connect_to_admin_server(char * user_name, char * password, char * service, i
     if (len != sizeof(HTTP_CONNECT_REQ)-1) {
         ERROR("sending http connect request, %s\n", strerror(errno));
         close(sfd);
-        *connect_status = STATUS_ERR_SERVER_CONNECT;
+        *connect_status = STATUS_ERR_FAILED_CONNECT_TO_SERVER;
         return -1;
     }
 
@@ -131,13 +131,13 @@ int connect_to_admin_server(char * user_name, char * password, char * service, i
     if (len != sizeof(http_connect_resp)-1) {
         ERROR("reading http connect response, %s\n", strerror(errno));
         close(sfd);
-        *connect_status = STATUS_ERR_SERVER_CONNECT;
+        *connect_status = STATUS_ERR_FAILED_CONNECT_TO_SERVER;
         return -1;
     }
     if (strcmp(http_connect_resp, HTTP_CONNECT_RESP) != 0) {
         ERROR("invalid http connect response, '%s'\n", http_connect_resp);
         close(sfd);
-        *connect_status = STATUS_ERR_SERVER_CONNECT;
+        *connect_status = STATUS_ERR_FAILED_CONNECT_TO_SERVER;
         return -1;
     }
 
@@ -150,7 +150,7 @@ int connect_to_admin_server(char * user_name, char * password, char * service, i
     if (len != sizeof(login)) {
         ERROR("sending login request to admin server, %s\n", strerror(errno));
         close(sfd);
-        *connect_status = STATUS_ERR_SERVER_CONNECT;
+        *connect_status = STATUS_ERR_FAILED_CONNECT_TO_SERVER;
         return -1;
     }
 
@@ -159,7 +159,7 @@ int connect_to_admin_server(char * user_name, char * password, char * service, i
     if (len != sizeof(login_response)) {
         ERROR("reading login response from admin server, %s\n", strerror(errno));
         close(sfd);
-        *connect_status = STATUS_ERR_SERVER_CONNECT;
+        *connect_status = STATUS_ERR_FAILED_CONNECT_TO_SERVER;
         return -1;
     }
 
@@ -169,9 +169,9 @@ int connect_to_admin_server(char * user_name, char * password, char * service, i
         memcpy(login_err_str, &login_response, 4);
         read(sfd,login_err_str+4,sizeof(login_err_str)-5);
         if (sscanf(login_err_str, "status=%d", connect_status) != 1) {
-            *connect_status = STATUS_ERR_INVALID_LOGIN_RESPONSE;
+            *connect_status = STATUS_ERR_INVLD_RESP_FROM_SERVER;
         }
-        ERROR("login failed, %s, %s\n", login_err_str, status2str(*connect_status));
+        ERROR("failed, %s, %s\n", login_err_str, status2str(*connect_status));
         close(sfd);
         return -1;
     }
@@ -362,32 +362,51 @@ done:
 
 #ifndef ANDROID
 
-FILE * logmsg_fp;
-FILE * logmsg_fp_old;
-size_t logmsg_file_size;
+FILE * logmsg_fp             = NULL;
+FILE * logmsg_fp_old         = NULL;
+size_t logmsg_file_size      = 0;
 char   logmsg_file_name[100] = "stderr";
+bool   logmsg_disabled       = false;
+bool   logmsg_init_called    = false;
 
 void logmsg_init(char * file_name)
 {
     struct stat buf;
 
+    // don't support calling this routine more than once
+    if (logmsg_init_called) {
+        FATAL("logmsg_init called multiple times\n");
+    }
+    logmsg_init_called = true;
+
+    // save copy of file_name
     strcpy(logmsg_file_name, file_name);
 
+    // determine logmsg_disabled flag, if set then return
+    logmsg_disabled = (strcmp(logmsg_file_name, "none") == 0);
+    if (logmsg_disabled) {
+        return;
+    }
+
+    // if logmsg_file_name is stderr then set logmsg_fp to NULL and return
     if (strcmp(logmsg_file_name, "stderr") == 0) {
         logmsg_fp = NULL;
-    } else {
-        logmsg_fp = fopen(logmsg_file_name, "ae");   // mode: append, close-on-exec
-        if (logmsg_fp == NULL) {
-            FATAL("failed to create logmsg file %s, %s\n", logmsg_file_name, strerror(errno));
-        }
-
-        if (stat(logmsg_file_name, &buf) != 0) {
-            FATAL("failed to stat logmsg file %s, %s\n", logmsg_file_name, strerror(errno));
-        }
-        logmsg_file_size = buf.st_size;
-
-        setlinebuf(logmsg_fp);
+        return;
     }
+
+    // logging is to a file:
+    // - open the file
+    // - determine its size
+    // - set line buffering
+    logmsg_fp = fopen(logmsg_file_name, "ae");   // mode: append, close-on-exec
+    if (logmsg_fp == NULL) {
+        FATAL("failed to create logmsg file %s, %s\n", logmsg_file_name, strerror(errno));
+    }
+    if (stat(logmsg_file_name, &buf) != 0) {
+        FATAL("failed to stat logmsg file %s, %s\n", logmsg_file_name, strerror(errno));
+    }
+    logmsg_file_size = buf.st_size;
+    setlinebuf(logmsg_fp);
 }
 
 void logmsg(char *lvl, const char *func, char *fmt, ...) 
@@ -396,6 +415,19 @@ void logmsg(char *lvl, const char *func, char *fmt, ...)
     char    msg[1000];
     int     len, cnt;
     char    time_str[MAX_TIME_STR];
+
+    // if disabled then 
+    // - print FATAL msg to stderr
+    // - return
+    // endif
+    if (logmsg_disabled) {
+        if (strcmp(lvl, "FATAL") == 0) {
+            va_start(ap, fmt);
+            vfprintf(stderr, fmt, ap);
+            va_end(ap);
+        }
+        return;
+    }
 
     // construct msg
     va_start(ap, fmt);
@@ -466,7 +498,8 @@ void printmsg(char *fmt, ...)
 
 void logmsg_init(char * file_name)
 {
-    // nothing to do here for Android
+    // nothing to do here for Android,
+    // logging is always performed
 }
 
 void logmsg(char *lvl, const char *func, char *fmt, ...) 
@@ -519,15 +552,11 @@ void logmsg(char *lvl, const char *func, char *fmt, ...)
 
 void printmsg(char *fmt, ...) 
 {
-#if 1
-    // this is intended for command line user interface, which is not available on android
-#else
     va_list ap;
 
     va_start(ap, fmt);
     SDL_LogMessageV(SDL_LOG_CATEGORY_APPLICATION, SDL_LOG_PRIORITY_INFO, fmt, ap);
     va_end(ap);
-#endif
 }
 
 #endif

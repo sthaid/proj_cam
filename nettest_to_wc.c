@@ -35,6 +35,8 @@ int main(int argc, char **argv)
     char        * user_name;
     char        * password;
     int           ret;
+    bool          debug_mode = false;
+    bool          help_mode = false;
 
     // set resource limti to allow core dumps
     rl.rlim_cur = RLIM_INFINITY;
@@ -51,7 +53,7 @@ int main(int argc, char **argv)
     // parse options
     p2p = &p2p1;
     while (true) {
-        opt_char = getopt(argc, argv, "Pu:p:v");
+        opt_char = getopt(argc, argv, "Pu:p:hdv");
         if (opt_char == -1) {
             break;
         }
@@ -65,6 +67,12 @@ int main(int argc, char **argv)
         case 'p':
             password = optarg;
             break;
+        case 'h':
+            help_mode = true;
+            break;
+        case 'd':
+            debug_mode = true;
+            break;
         case 'v':
             PRINTF("version %d.%d\n", VERSION_MAJOR, VERSION_MINOR);
             return 0;
@@ -73,12 +81,17 @@ int main(int argc, char **argv)
         }
     }
 
+    // init logging
+    logmsg_init(debug_mode ? "stderr" : "none");
+
     // verify args
-    if ((user_name == NULL) || (password == NULL) || (argc-optind != 1)) {
+    if (help_mode || (user_name == NULL) || (password == NULL) || (argc-optind != 1)) {
         PRINTF("usage: nettest_to_wc <wc_name>\n");
         PRINTF("  -P: use http proxy server\n");
         PRINTF("  -u <user_name>: override WC_USER_NAME environment value\n");
         PRINTF("  -p <password>: override WC_PASSWORD environment value\n");
+        PRINTF("  -h: display this help text\n");
+        PRINTF("  -d: enable debug mode\n");
         PRINTF("  -v: display version and exit\n");
         return 1;
     }

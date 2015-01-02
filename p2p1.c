@@ -1776,11 +1776,11 @@ void * monitor_thread(void * cx)
 
         // print header
         if ((print_header_count++ % 10) == 0) {
-            INFO("\n");
-            INFO("                                                Peer  Peer  \n");
-            INFO("            Sent  Recvd Sent  Recvd Resnd RcvDp Resnd RcvDp \n");
-            INFO("Send  Recv  Data  Data  Ack   Ack   Data  Data  Data  Data  \n");
-            INFO("Mb/S  Mb/S  Dgram Dgram Dgram Dgram Dgram Dgram Dgram Dgram \n");
+            PRINTF("\n");
+            PRINTF("                                                Peer  Peer  \n");
+            PRINTF("            Sent  Recvd Sent  Recvd Resnd RcvDp Resnd RcvDp \n");
+            PRINTF("Send  Recv  Data  Data  Ack   Ack   Data  Data  Data  Data  \n");
+            PRINTF("Mb/S  Mb/S  Dgram Dgram Dgram Dgram Dgram Dgram Dgram Dgram \n");
         }
 
         // sleep for caller's desired interval
@@ -1797,7 +1797,7 @@ void * monitor_thread(void * cx)
 
         // print changes since stats_last
         interval_ms = stats_time_ms - stats_last_time_ms;
-        INFO("%5.1f %5.1f %5d %5d %5d %5d %5d %5d %5d %5d\n",
+        PRINTF("%5.1f %5.1f %5d %5d %5d %5d %5d %5d %5d %5d\n",
              (double)DELTA(sent_bytes) * 8 / (interval_ms * 1000),
              (double)DELTA(recvd_bytes) * 8 / (interval_ms * 1000),
              (int)DELTA(sent_data_dgrams),

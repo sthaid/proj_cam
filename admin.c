@@ -28,6 +28,8 @@ int main(int argc, char **argv)
     char            opt_char;
     int             connect_status;
     bool            create_account = false;
+    bool            debug_mode = false;
+    bool            help_mode = false;
 
     // set stdout to unbuffered
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -46,7 +48,7 @@ int main(int argc, char **argv)
 
     // parse options
     while (true) {
-        opt_char = getopt(argc, argv, "cu:p:v");
+        opt_char = getopt(argc, argv, "cu:p:hdv");
         if (opt_char == -1) {
             break;
         }
@@ -60,6 +62,12 @@ int main(int argc, char **argv)
         case 'p':
             password = optarg;
             break;
+        case 'h':
+            help_mode = true;
+            break;
+        case 'd':
+            debug_mode = true;
+            break;
         case 'v':
             PRINTF("version %d.%d\n", VERSION_MAJOR, VERSION_MINOR);
             return 0;
@@ -68,12 +76,17 @@ int main(int argc, char **argv)
         }
     }
 
+    // init logging
+    logmsg_init(debug_mode ? "stderr" : "none");
+
     // verify user_name, password, and args
-    if ((user_name == NULL) || (password == NULL) || (argc-optind != 0)) {
+    if (help_mode || (user_name == NULL) || (password == NULL) || (argc-optind != 0)) {
         PRINTF("usage: wc_admin\n");
         PRINTF("  -c: create account\n");
         PRINTF("  -u <user_name>: override WC_USER_NAME environment value\n");
         PRINTF("  -p <password>: override WC_PASSWORD environment value\n");
+        PRINTF("  -h: display this help text\n");
+        PRINTF("  -d: enable debug mode\n");
         PRINTF("  -v: display version and exit\n");
         return 1;
     }
@@ -84,7 +97,7 @@ int main(int argc, char **argv)
                                   create_account ? "create" : "login",
                                   &connect_status);
     if (sfd == -1) {
-        PRINTF("connect to server failed, %s\n", status2str(connect_status));
+        PRINTF("error: %s\n", status2str(connect_status));
         return 1;
     }
 
