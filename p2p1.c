@@ -259,6 +259,8 @@ int p2p1_connect(char * user_name, char * password, char * wc_name, int service,
     // repeat tries to receive the peer to peer info from admin_server
     // that is needed to establish the connection to the webcam
     for (i = 0; i < 5; i++) {
+        bool last_try = (i == 4);
+
         // generate the dgram_uid, which is used to validate the response 
         dgram_uid = dgram_uid_gen();          
 
@@ -352,7 +354,7 @@ int p2p1_connect(char * user_name, char * password, char * wc_name, int service,
 
         // if response is rejection then return errror
         if (dgram.id == DGRAM_ID_CONNECT_REJECT) {
-            if (dgram.u.connect_reject.status == STATUS_ERR_WC_ADDR_NOT_AVAIL) {
+            if (dgram.u.connect_reject.status == STATUS_ERR_WC_ADDR_NOT_AVAIL && !last_try) {
                 INFO("recvd dgram rejection, status WC_ADDR_NOT_AVAIL, retrying in 1 sec\n");
                 sleep(1);
                 continue;
