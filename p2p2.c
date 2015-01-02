@@ -105,6 +105,7 @@ try_again:
     con->mon_thread_id = thread_id;
 
     // return handle
+    INFO("connected to '%s', service=%s, handle=%d\n", wc_name, SERVICE_STR(service_id), handle);
     *connect_status = STATUS_INFO_OK;
     return handle;
 }
@@ -133,7 +134,6 @@ static int p2p2_disconnect(int handle)
     if (con->mon_thread_id != 0) {
         con->mon_thread_cancel_req = true;
         pthread_join(con->mon_thread_id, NULL);
-        INFO("XXX JOINED WITH MONIOR THREAD\n");
         con->mon_thread_id = 0;
     }
 
@@ -144,6 +144,7 @@ static int p2p2_disconnect(int handle)
     bzero(con, sizeof(con_t));
 
     // return status
+    INFO("disconnected, handle=%d, ret=%d\n", handle, ret);
     return ret;
 }
 
