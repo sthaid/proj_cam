@@ -87,6 +87,7 @@ int main(int argc, char **argv)
 
     // initialize message logging
     logmsg_init(debug_mode == 0 ? "wc_server.log" : "stderr");
+    INFO("STARTING %s\n", argv[0]);
 
     // get the wc_macaddr, this is used to identify this webcam in the wc_announce dgram
     tries = 0;
@@ -159,6 +160,7 @@ int main(int argc, char **argv)
         pthread_create(&thread, &thread_attr, service_tbl[i].service_proc, (void*)(long)handle);
     }
 
+    INFO("TERMINATING %s\n", argv[0]);
     return 0;
 }
 

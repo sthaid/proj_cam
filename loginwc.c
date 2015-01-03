@@ -78,6 +78,7 @@ int main(int argc, char **argv)
 
     // init logging
     logmsg_init(debug_mode ? "stderr" : "none");
+    INFO("STARTING %s\n", argv[0]);
 
     // verify args
     if (help_mode || (user_name == NULL) || (password == NULL) || (argc-optind != 1)) {
@@ -125,6 +126,7 @@ int main(int argc, char **argv)
     p2p_disconnect(handle);
 
     // return success
+    INFO("TERMINATING %s\n", argv[0]);
     return 0;
 }
 

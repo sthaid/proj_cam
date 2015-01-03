@@ -133,9 +133,9 @@ int main(int argc, char ** argv)
 
     // initialize message logging
     logmsg_init(debug_mode == 0 ? "admin_server.log" : "stderr");
+    INFO("STARTING %s\n", argv[0]);
 
     // call subsystem initialization routines
-    INFO("initializing\n");
     account_init();
     dgram_init();
 
@@ -182,7 +182,7 @@ int main(int argc, char ** argv)
     }
 
     // return
-    INFO("shutdown\n");
+    INFO("TERMINATING %s\n", argv[0]);
     return 0;
 }
 

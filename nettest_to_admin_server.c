@@ -67,6 +67,7 @@ int main(int argc, char **argv)
 
     // init logging
     logmsg_init(debug_mode ? "stderr" : "none");
+    INFO("STARTING %s\n", argv[0]);
 
     // verify user_name, password, and args
     if (help_mode || (user_name == NULL) || (password == NULL) || (argc-optind != 0)) {
@@ -83,6 +84,7 @@ int main(int argc, char **argv)
     nettest_to_admin_server(user_name, password);
 
     // return success
+    INFO("TERMINATING %s\n", argv[0]);
     return 0;
 }
 

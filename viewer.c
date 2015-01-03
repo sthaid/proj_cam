@@ -368,6 +368,7 @@ int main(int argc, char **argv)
 
     // init logging
     logmsg_init(CONFIG_DEBUG == 'Y' ? "stderr" : "none");
+    INFO("STARTING %s\n", argv[0]);
 
     // init real time clock
     real_time_init();
@@ -462,7 +463,7 @@ int main(int argc, char **argv)
     SDL_Quit();
 
     // log program termination message
-    INFO("program terminating\n");
+    INFO("TERMINATING %s\n", argv[0]);
 
 #ifndef ANDROID
     // send SIGTERM to this process, this will allow readline to reset the
