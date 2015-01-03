@@ -5,7 +5,6 @@
 #include <SDL_ttf.h>
 #include <SDL_mixer.h>
 
-// XXX use SET_CTL_MODE_PLAYBACK_TIME(delta_us)
 // ZZZ review all struct fields
 // ZZZ mode locking
 
@@ -14,7 +13,7 @@
 //
 
 #define MAX_WEBCAM                  4
-#define MAX_STR                     100  //ZZZ delete or search and pick more reasonable size
+#define MAX_STR                     200  //ZZZ delete or search and pick more reasonable size
 
 #define WIN_WIDTH_INITIAL           1280
 #define WIN_HEIGHT_INITIAL          800
@@ -50,9 +49,15 @@
 #define PANE_COLS(p,fid)            ((p)->w / font[fid].char_width)
 #define PANE_ROWS(p,fid)            ((p)->h / font[fid].char_height)
 #ifndef ANDROID
-#define FONT_PATH                   "/usr/share/fonts/gnu-free/FreeMonoBold.ttf"
+#define FONT0_PATH                   "/usr/share/fonts/gnu-free/FreeMonoBold.ttf"
+#define FONT0_PTSIZE                 20
+#define FONT1_PATH                   "/usr/share/fonts/gnu-free/FreeMonoBold.ttf"
+#define FONT1_PTSIZE                 32
 #else
-#define FONT_PATH                   "/system/fonts/DroidSansMono.ttf"
+#define FONT0_PATH                   "/system/fonts/DroidSansMono.ttf"
+#define FONT0_PTSIZE                 24
+#define FONT1_PATH                   "/system/fonts/DroidSansMono.ttf"
+#define FONT1_PTSIZE                 50
 #endif
 
 #define MAX_MOUSE_EVENT                       256
@@ -83,10 +88,10 @@
 #define MOUSE_EVENT_CONFIG_KEY_ESC            128
 #define MOUSE_EVENT_CONFIG_KEY_BS             129
 #define MOUSE_EVENT_CONFIG_KEY_ENTER          130
-#define MOUSE_EVENT_WC_ZOOM                   140
-#define MOUSE_EVENT_WC_NAME                   150    // 4 webcams
-#define MOUSE_EVENT_WC_RES                    160    // 4 webcams
-#define MOUSE_EVENT_WC_NAME_LIST              170    // 8 list events per wc, 32 total
+#define MOUSE_EVENT_WC_NAME_LIST              140    // 8 list events per wc, 32 total
+#define MOUSE_EVENT_WC_ZOOM                   180    // 4 webcams
+#define MOUSE_EVENT_WC_NAME                   190    // 4 webcams
+#define MOUSE_EVENT_WC_RES                    200    // 4 webcams
 
 #define STATE_NOT_CONNECTED                   0
 #define STATE_CONNECTING                      1
@@ -407,14 +412,14 @@ int main(int argc, char **argv)
     if (TTF_Init() < 0) {
         FATAL("TTF_Init failed\n");
     }
-    font[0].font = TTF_OpenFont(FONT_PATH, 20);
+    font[0].font = TTF_OpenFont(FONT0_PATH, FONT0_PTSIZE);
     if (font[0].font == NULL) {
-        FATAL("failed TTF_OpenFont %s\n", FONT_PATH);
+        FATAL("failed TTF_OpenFont %s\n", FONT0_PATH);
     }
     TTF_SizeText(font[0].font, "X", &font[0].char_width, &font[0].char_height);
-    font[1].font = TTF_OpenFont(FONT_PATH, 32);
+    font[1].font = TTF_OpenFont(FONT1_PATH, FONT1_PTSIZE);
     if (font[1].font == NULL) {
-        FATAL("failed TTF_OpenFont %s\n", FONT_PATH);
+        FATAL("failed TTF_OpenFont %s\n", FONT1_PATH);
     }
     TTF_SizeText(font[1].font, "X", &font[1].char_width, &font[1].char_height);
 
@@ -446,6 +451,9 @@ int main(int argc, char **argv)
         display_handler();
         usleep(10*MS);
     }
+
+    // short delay to ensure time for the button click to be generated
+    usleep(500*MS);
 
     // wait for up to 3 second for the webcam threads to terminate
     count = 0;
@@ -1257,7 +1265,7 @@ void display_handler(void)
             pthread_mutex_lock(&wc->image_mutex);
 
             // display border 
-            if (wc->image_highlight) {
+            if (wc->image_highlight && !wc->name_select_mode) {
                 SDL_SetRenderDrawColor(renderer, 255, 255, 255, SDL_ALPHA_OPAQUE);
             } else {
                 SDL_SetRenderDrawColor(renderer, 0, 0, 255, SDL_ALPHA_OPAQUE);
@@ -1286,11 +1294,15 @@ void display_handler(void)
 
             // display webcam_names
             if (wc->name_select_mode) {
+                // display the list of available webcam names to choose from
                 for (j = 0; j < max_webcam_names; j++) {
                     render_text(&wcimagepane[i], 1+2*j, 0, 
                                 webcam_names[j],
                                 MOUSE_EVENT_WC_NAME_LIST + 8 * i + j);
                 }
+
+                // register for the zoom event
+                event.mouse_event_pos[MOUSE_EVENT_WC_ZOOM+i] = wcimagepane[i];
 
             // display the image
             } else if (wc->image_display) {
