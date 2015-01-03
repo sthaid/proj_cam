@@ -18,8 +18,8 @@
 
 #define WIN_WIDTH_INITIAL           1280
 #define WIN_HEIGHT_INITIAL          800
-#define WIN_WIDTH_MIN               800
-#define WIN_HEIGHT_MIN              500
+#define WIN_WIDTH_MIN               840
+#define WIN_HEIGHT_MIN              525
 #define CTL_COLS                    14
 #define CTL_WIDTH                   (CTL_COLS * font[0].char_width)
 #define CTLB_ROWS                   7
@@ -68,6 +68,10 @@
 #define MOUSE_EVENT_PLAYBACK_REVERSE          12
 #define MOUSE_EVENT_PLAYBACK_FASTER           13
 #define MOUSE_EVENT_PLAYBACK_SLOWER           14
+#define MOUSE_EVENT_PLAYBACK_HOUR_MINUS       15
+#define MOUSE_EVENT_PLAYBACK_HOUR_PLUS        16
+#define MOUSE_EVENT_PLAYBACK_MINUTE_MINUS     17
+#define MOUSE_EVENT_PLAYBACK_MINUTE_PLUS      18
 #define MOUSE_EVENT_CONFIG_PROXY              20
 #define MOUSE_EVENT_CONFIG_TIME               21
 #define MOUSE_EVENT_CONFIG_SERVER_CHECK       22
@@ -157,14 +161,23 @@
         mode.mode_id++; \
     } while (0)
 
-#define SET_CTL_MODE_PLAYBACK_TIME(delta_us) \
+#define SET_CTL_MODE_PLAYBACK_TIME(delta_sec) \
     do { \
+        uint64_t curr_real_time_us = get_real_time_us(); \
+        uint64_t new_pb_real_time_us; \
         mode.mode = MODE_PLAYBACK; \
         if (mode.pb_submode == PB_SUBMODE_PLAY) { \
-            mode.pb_real_time_us = PB_SUBMODE_PLAY_REAL_TIME_US(&mode); \
+            new_pb_real_time_us = PB_SUBMODE_PLAY_REAL_TIME_US(&mode) + \
+                                  ((int64_t)(delta_sec) * 1000000); \
+        } else { \
+            new_pb_real_time_us = mode.pb_real_time_us + \
+                                  ((int64_t)(delta_sec) * 1000000); \
         } \
-        mode.pb_mode_entry_real_time_us = get_real_time_us(); \
-        mode.pb_real_time_us += (delta_us);   \
+        if (new_pb_real_time_us > curr_real_time_us - 2000000) { \
+            new_pb_real_time_us = curr_real_time_us - 2000000; \
+        } \
+        mode.pb_mode_entry_real_time_us = curr_real_time_us; \
+        mode.pb_real_time_us = new_pb_real_time_us; \
         if (mode.pb_submode == PB_SUBMODE_STOP) { \
             mode.pb_submode = PB_SUBMODE_PAUSE; \
         } \
@@ -754,6 +767,90 @@ void display_handler(void)
             }
             SET_CTL_MODE_PLAYBACK_SPEED(speed);
 
+        } else if (event.mouse_event == MOUSE_EVENT_PLAYBACK_HOUR_MINUS) {
+            struct tm tm;
+            time_t    secs;
+            int       delta_sec;
+
+            secs = (mode.pb_submode == PB_SUBMODE_PLAY
+                    ? PB_SUBMODE_PLAY_REAL_TIME_US(&mode) / 1000000
+                    : mode.pb_real_time_us / 1000000);
+
+            if (CONFIG_LOCALTIME == 'Y') {
+                localtime_r(&secs, &tm);
+            } else {
+                gmtime_r(&secs, &tm);
+            }
+
+            delta_sec = tm.tm_min * 60 + tm.tm_sec;
+            if (tm.tm_min == 0 && tm.tm_sec <= 3) {
+                delta_sec += 3600;
+            }
+            SET_CTL_MODE_PLAYBACK_TIME(-delta_sec);
+
+        } else if (event.mouse_event == MOUSE_EVENT_PLAYBACK_HOUR_PLUS) {
+            struct tm tm;
+            time_t    secs;
+            int       delta_sec;
+
+            secs = (mode.pb_submode == PB_SUBMODE_PLAY
+                    ? PB_SUBMODE_PLAY_REAL_TIME_US(&mode) / 1000000
+                    : mode.pb_real_time_us / 1000000);
+
+            if (CONFIG_LOCALTIME == 'Y') {
+                localtime_r(&secs, &tm);
+            } else {
+                gmtime_r(&secs, &tm);
+            }
+
+            delta_sec = 3600 - (tm.tm_min * 60 + tm.tm_sec);
+            if (tm.tm_min == 59 && tm.tm_sec >= 56) {
+                delta_sec += 3600;
+            }
+            SET_CTL_MODE_PLAYBACK_TIME(delta_sec);
+
+        } else if (event.mouse_event == MOUSE_EVENT_PLAYBACK_MINUTE_MINUS) {
+            struct tm tm;
+            time_t    secs;
+            int       delta_sec;
+
+            secs = (mode.pb_submode == PB_SUBMODE_PLAY
+                    ? PB_SUBMODE_PLAY_REAL_TIME_US(&mode) / 1000000
+                    : mode.pb_real_time_us / 1000000);
+
+            if (CONFIG_LOCALTIME == 'Y') {
+                localtime_r(&secs, &tm);
+            } else {
+                gmtime_r(&secs, &tm);
+            }
+
+            delta_sec = tm.tm_sec;
+            if (tm.tm_sec <= 3) {
+                delta_sec += 60;
+            }
+            SET_CTL_MODE_PLAYBACK_TIME(-delta_sec);
+
+        } else if (event.mouse_event == MOUSE_EVENT_PLAYBACK_MINUTE_PLUS) {
+            struct tm tm;
+            time_t    secs;
+            int       delta_sec;
+
+            secs = (mode.pb_submode == PB_SUBMODE_PLAY
+                    ? PB_SUBMODE_PLAY_REAL_TIME_US(&mode) / 1000000
+                    : mode.pb_real_time_us / 1000000);
+
+            if (CONFIG_LOCALTIME == 'Y') {
+                localtime_r(&secs, &tm);
+            } else {
+                gmtime_r(&secs, &tm);
+            }
+
+            delta_sec = 60 - tm.tm_sec;
+            if (tm.tm_sec >= 56) {
+                delta_sec += 60;
+            }
+            SET_CTL_MODE_PLAYBACK_TIME(delta_sec);
+
         } else if (event.mouse_event == MOUSE_EVENT_CONFIG_PROXY) {
             CONFIG_PROXY = (CONFIG_PROXY == 'N' ? 'Y' : 'N');
             CONFIG_WRITE();
@@ -1281,13 +1378,16 @@ void display_handler(void)
         // 04:
         // 05:   PLAYING         ... STATUS   (STOPPED | PAUSED)
         // 06:   FWD  1X         ... STATUS   (REV  1X)
-        // 07:
-        // 08:                                  STOPPED       PLAYING      PAUSED
-        // 09:   STOP    PAUSE   ... CONTROL  (PLAY PAUSE | STOP PAUSE | STOP PLAY)
-        // 10:
-        // 11:   FWD     REV
-        // 12:
-        // 13:   FASTER  SLOWER
+        // 07:                                  STOPPED       PLAYING      PAUSED
+        // 08:   STOP    PAUSE   ... CONTROL  (PLAY PAUSE | STOP PAUSE | STOP PLAY)
+        // 09:
+        // 10:   REV     FWD
+        // 11:
+        // 12:   SLOWER  FASTER
+        // 13:   
+        // 14:   HOUR-   HOUR+
+        // 15:   
+        // 16:   MIN-    MIN+
 
         // title
         render_text(&ctlpane, 0, 0, "PLAYBACK", MOUSE_EVENT_MODE_SELECT);
@@ -1310,26 +1410,32 @@ void display_handler(void)
 
         // control: stop,play,pause
         if (m.pb_submode == PB_SUBMODE_STOP) {
-            render_text(&ctlpane, 9, 0, "PLAY", MOUSE_EVENT_PLAYBACK_PLAY);
-            render_text(&ctlpane, 9, 8, "PAUSE", MOUSE_EVENT_PLAYBACK_PAUSE);
+            render_text(&ctlpane, 8, 0, "PLAY", MOUSE_EVENT_PLAYBACK_PLAY);
+            render_text(&ctlpane, 8, 8, "PAUSE", MOUSE_EVENT_PLAYBACK_PAUSE);
         } else if (m.pb_submode == PB_SUBMODE_PLAY) {
-            render_text(&ctlpane, 9, 0, "STOP", MOUSE_EVENT_PLAYBACK_STOP);
-            render_text(&ctlpane, 9, 8, "PAUSE", MOUSE_EVENT_PLAYBACK_PAUSE);
+            render_text(&ctlpane, 8, 0, "STOP", MOUSE_EVENT_PLAYBACK_STOP);
+            render_text(&ctlpane, 8, 8, "PAUSE", MOUSE_EVENT_PLAYBACK_PAUSE);
         } else if (m.pb_submode == PB_SUBMODE_PAUSE) {
-            render_text(&ctlpane, 9, 0, "STOP", MOUSE_EVENT_PLAYBACK_STOP);
-            render_text(&ctlpane, 9, 8, "PLAY", MOUSE_EVENT_PLAYBACK_PLAY);
+            render_text(&ctlpane, 8, 0, "STOP", MOUSE_EVENT_PLAYBACK_STOP);
+            render_text(&ctlpane, 8, 8, "PLAY", MOUSE_EVENT_PLAYBACK_PLAY);
         } else {
-            render_text(&ctlpane, 9, 0, "????", MOUSE_EVENT_NONE);
-            render_text(&ctlpane, 9, 8, "????", MOUSE_EVENT_NONE);
+            render_text(&ctlpane, 8, 0, "????", MOUSE_EVENT_NONE);
+            render_text(&ctlpane, 8, 8, "????", MOUSE_EVENT_NONE);
         }
 
         // control: fwd,rev
-        render_text(&ctlpane, 11, 0, "FWD", MOUSE_EVENT_PLAYBACK_FORWARD);
-        render_text(&ctlpane, 11, 8, "REV", MOUSE_EVENT_PLAYBACK_REVERSE);
+        render_text(&ctlpane, 10, 0, "REV", MOUSE_EVENT_PLAYBACK_REVERSE);
+        render_text(&ctlpane, 10, 8, "FWD", MOUSE_EVENT_PLAYBACK_FORWARD);
 
         // control: fast,slow
-        render_text(&ctlpane, 13, 0, "FASTER", MOUSE_EVENT_PLAYBACK_FASTER);
-        render_text(&ctlpane, 13, 8, "SLOWER", MOUSE_EVENT_PLAYBACK_SLOWER);
+        render_text(&ctlpane, 12, 0, "SLOWER", MOUSE_EVENT_PLAYBACK_SLOWER);
+        render_text(&ctlpane, 12, 8, "FASTER", MOUSE_EVENT_PLAYBACK_FASTER);
+
+        // control: hour-, hour+,min-,min+
+        render_text(&ctlpane, 14, 0, "HOUR-", MOUSE_EVENT_PLAYBACK_HOUR_MINUS);
+        render_text(&ctlpane, 14, 8, "HOUR+", MOUSE_EVENT_PLAYBACK_HOUR_PLUS);
+        render_text(&ctlpane, 16, 0, "MIN-",  MOUSE_EVENT_PLAYBACK_MINUTE_MINUS);
+        render_text(&ctlpane, 16, 8, "MIN+",  MOUSE_EVENT_PLAYBACK_MINUTE_PLUS);
     }
 
     // -----------------------------------------------
