@@ -5,6 +5,11 @@
 #include <SDL_ttf.h>
 #include <SDL_mixer.h>
 
+// XXX changing Android orientatiton not always working
+// XXX portrait mode
+// XXX should handle SDL_WINDOWEVENT_FOCUS_LOST and GAINED
+//     or MINIMIZED / RESTORED,   stop updating display and pause connection ??
+
 // ZZZ review all struct fields
 // ZZZ mode locking
 
@@ -17,8 +22,6 @@
 
 #define WIN_WIDTH_INITIAL           1280
 #define WIN_HEIGHT_INITIAL          800
-#define WIN_WIDTH_MIN               840
-#define WIN_HEIGHT_MIN              525
 #define CTL_COLS                    14
 #define CTL_WIDTH                   (CTL_COLS * font[0].char_width)
 #define CTLB_ROWS                   7
@@ -92,6 +95,9 @@
 #define MOUSE_EVENT_WC_ZOOM                   180    // 4 webcams
 #define MOUSE_EVENT_WC_NAME                   190    // 4 webcams
 #define MOUSE_EVENT_WC_RES                    200    // 4 webcams
+
+#define QUIT_EVENT_REASON_MOUSE               1
+#define QUIT_EVENT_REASON_SDL                 2
 
 #define STATE_NOT_CONNECTED                   0
 #define STATE_CONNECTING                      1
@@ -277,6 +283,7 @@ typedef struct {
     int      window_resize_height;
 
     bool     quit_event;
+    int      quit_event_reason;
 } event_t;
 
 typedef struct {
@@ -354,6 +361,23 @@ int main(int argc, char **argv)
         WARN("setrlimit for core dump, %s\n", strerror(errno));
     }
 
+    // reset global variables to their default values; 
+    // this is needed on Android because the Java Shim can re-invoke
+    // main without resetting these
+    bzero(&mode, sizeof(mode));
+    server_check_status = STATUS_INFO_NOT_RUN;
+    bzero(webcam_names, sizeof(webcam_names));
+    max_webcam_names = 0;
+    webcam_threads_running_count = 0;
+    window = NULL;
+    renderer = NULL;
+    win_width = 0;
+    win_height = 0;
+    bzero(font, sizeof(font));
+    button_sound = NULL;
+    bzero(webcam, sizeof(webcam));
+    bzero(&event, sizeof(event));
+
     // read viewer config
 #ifndef ANDROID
     config_dir = getenv("HOME");
@@ -397,6 +421,7 @@ int main(int argc, char **argv)
         FATAL("SDL_CreateWindowAndRenderer failed\n");
     }
     SDL_GetWindowSize(window, &win_width, &win_height);
+    INFO("win_width=%d win_height=%d\n", win_width, win_height);
 
     // init button_sound
     if (Mix_OpenAudio( 22050, MIX_DEFAULT_FORMAT, 2, 4096) < 0) {
@@ -467,21 +492,45 @@ int main(int argc, char **argv)
     // cleanup
     Mix_FreeChunk(button_sound);
     Mix_CloseAudio();
+
+    for (i = 0; i < MAX_FONT; i++) {
+        TTF_CloseFont(font[i].font);
+    }
     TTF_Quit();
+
+    SDL_PumpEvents();  // helps on Android when terminating via return
+    for (i = 0; i < MAX_WEBCAM; i++) {
+        if (webcam[i].texture) {
+            SDL_DestroyTexture(webcam[i].texture); 
+        }
+    }
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
     SDL_Quit();
 
-    // log program termination message
-    INFO("TERMINATING %s\n", argv[0]);
+    // terminate ...
 
 #ifndef ANDROID
     // send SIGTERM to this process, this will allow readline to reset the
     // terminal attributes prior to program termination
     if (debug_thread_id) {
+        INFO("TERMINATING %s: SEND SIGTERM\n", argv[0]);
         kill(getpid(), SIGTERM);
     }
 #endif
 
-    // return success
+    // if terminating due to QUIT_EVENT_REASON_MOUSE then call exit;
+    // on Android this causes the App (including the java shim) to terminate
+    if (event.quit_event_reason == QUIT_EVENT_REASON_MOUSE) {
+        INFO("TERMINATING %s: CALL EXIT\n", argv[0]);
+        exit(0);
+    }
+
+    // return 0
+    // - on Android the java shim continues to run and the java shim may invoke main again
+    // - for example, on Android when changing the device orientation, the SDL_QUIT event
+    //   is generated causing program termination; followed by re-invoking of main
+    INFO("TERMINATING %s: RETURN FROM MAIN\n", argv[0]);
     return 0;
 }
 
@@ -577,6 +626,23 @@ void display_handler(void)
                                (ev.button.y >= (pos).y - 5) && \
                                (ev.button.y < (pos).y + (pos).h + 5))
 
+    #define SDL_WINDOWEVENT_STR(x) \
+       ((x) == SDL_WINDOWEVENT_SHOWN        ? "SDL_WINDOWEVENT_SHOWN"        : \
+        (x) == SDL_WINDOWEVENT_HIDDEN       ? "SDL_WINDOWEVENT_HIDDEN"       : \
+        (x) == SDL_WINDOWEVENT_EXPOSED      ? "SDL_WINDOWEVENT_EXPOSED"      : \
+        (x) == SDL_WINDOWEVENT_MOVED        ? "SDL_WINDOWEVENT_MOVED"        : \
+        (x) == SDL_WINDOWEVENT_RESIZED      ? "SDL_WINDOWEVENT_RESIZED"      : \
+        (x) == SDL_WINDOWEVENT_SIZE_CHANGED ? "SDL_WINDOWEVENT_SIZE_CHANGED" : \
+        (x) == SDL_WINDOWEVENT_MINIMIZED    ? "SDL_WINDOWEVENT_MINIMIZED"    : \
+        (x) == SDL_WINDOWEVENT_MAXIMIZED    ? "SDL_WINDOWEVENT_MAXIMIZED"    : \
+        (x) == SDL_WINDOWEVENT_RESTORED     ? "SDL_WINDOWEVENT_RESTORED"     : \
+        (x) == SDL_WINDOWEVENT_ENTER        ? "SDL_WINDOWEVENT_ENTER"        : \
+        (x) == SDL_WINDOWEVENT_LEAVE        ? "SDL_WINDOWEVENT_LEAVE"        : \
+        (x) == SDL_WINDOWEVENT_FOCUS_GAINED ? "SDL_WINDOWEVENT_FOCUS_GAINED" : \
+        (x) == SDL_WINDOWEVENT_FOCUS_LOST   ? "SDL_WINDOWEVENT_FOCUS_LOST"   : \
+        (x) == SDL_WINDOWEVENT_CLOSE        ? "SDL_WINDOWEVENT_CLOSE"        : \
+                                              "????")
+
     int         i, j, len;
     char        str[MAX_STR];
     char        date_and_time_str[MAX_TIME_STR];
@@ -633,7 +699,14 @@ void display_handler(void)
 
             for (i = 0; i < MAX_MOUSE_EVENT; i++) {
                 if (MOUSE_AT_POS(event.mouse_event_pos[i])) {
-                    event.mouse_event = i;
+                    if (i == MOUSE_EVENT_QUIT) {
+                        INFO("got event MOUSE_EVENT_QUIT\n");
+                        event.quit_event = true;
+                        event.quit_event_reason = QUIT_EVENT_REASON_MOUSE;
+                    } else {
+                        INFO("got event MOUSE_EVENT %d\n", i);
+                        event.mouse_event = i;
+                    }
                     PLAY_BUTTON_SOUND();
                     break;
                 }
@@ -667,6 +740,7 @@ void display_handler(void)
             break; }
 
        case SDL_WINDOWEVENT: {
+            DEBUG("got event SDL_WINOWEVENT - %s\n", SDL_WINDOWEVENT_STR(ev.window.event));
             switch (ev.window.event)  {
             case SDL_WINDOWEVENT_SIZE_CHANGED:
                 event.window_resize_width = ev.window.data1;
@@ -678,8 +752,17 @@ void display_handler(void)
             break; }
 
         case SDL_QUIT: {
+            INFO("got event SDL_QUIT\n");
             event.quit_event = true;
+            event.quit_event_reason = QUIT_EVENT_REASON_SDL;
             PLAY_BUTTON_SOUND();
+            break; }
+
+        case SDL_MOUSEMOTION: {
+            break; }
+
+        default: {
+            INFO("got event %d - not supported\n", ev.type);
             break; }
         }
 
@@ -705,27 +788,13 @@ void display_handler(void)
     if (event.window_resize_event) {
         win_width = event.window_resize_width;
         win_height = event.window_resize_height;
-        if (win_width < WIN_WIDTH_MIN || win_height < WIN_HEIGHT_MIN) {
-            if (win_width < WIN_WIDTH_MIN) {
-                win_width = WIN_WIDTH_MIN;
-            }
-            if (win_height < WIN_HEIGHT_MIN) {
-                win_height = WIN_HEIGHT_MIN;
-            }
-            usleep(1000*MS);  // XXX why is this delay needed?
-            SDL_SetWindowSize(window, win_width, win_height);
-        }
         event.window_resize_event = false;
         event_handled = true;
     }
 
     // mouse events
     if (event.mouse_event != MOUSE_EVENT_NONE) {
-        if (event.mouse_event == MOUSE_EVENT_QUIT) {
-            event.quit_event = true;
-            return;
-
-        } else if (event.mouse_event == MOUSE_EVENT_MODE_SELECT) {
+        if (event.mouse_event == MOUSE_EVENT_MODE_SELECT) {
             if (mode.mode == MODE_PLAYBACK) {
                 SET_CTL_MODE_LIVE();
             } else {
@@ -1245,10 +1314,10 @@ void display_handler(void)
             }
         }
 
-        render_text_ex(&keybdpane, r+8, c+0,  "SHIFT", MOUSE_EVENT_CONFIG_KEY_SHIFT, 0, false, 1);
-        render_text_ex(&keybdpane, r+8, c+8,  "ESC",   MOUSE_EVENT_CONFIG_KEY_ESC,   0, false, 1);
-        render_text_ex(&keybdpane, r+8, c+14, "BS",    MOUSE_EVENT_CONFIG_KEY_BS,    0, false, 1);
-        render_text_ex(&keybdpane, r+8, c+19, "ENTER", MOUSE_EVENT_CONFIG_KEY_ENTER, 0, false, 1);
+        render_text_ex(&keybdpane, r+8, c+0,  "SHIFT", MOUSE_EVENT_CONFIG_KEY_SHIFT, 5, false, 1);
+        render_text_ex(&keybdpane, r+8, c+8,  "ESC",   MOUSE_EVENT_CONFIG_KEY_ESC,   3, false, 1);
+        render_text_ex(&keybdpane, r+8, c+14, "BS",    MOUSE_EVENT_CONFIG_KEY_BS,    2, false, 1);
+        render_text_ex(&keybdpane, r+8, c+19, "ENTER", MOUSE_EVENT_CONFIG_KEY_ENTER, 5, false, 1);
     }
 
     // ----------------------------------------------
@@ -1276,21 +1345,34 @@ void display_handler(void)
                                wcpane[i].x+wcpane[i].w-1, wcpane[i].y+font[0].char_height+1);
 
             // display text line
-            render_text(&wctitlepane[i], 0, 0, win_id_str, MOUSE_EVENT_NONE);
-            render_text_ex(&wctitlepane[i], 
-                           0, 2, 
-                           wc->image_name, 
-                           MOUSE_EVENT_WC_NAME+i,
-                           PANE_COLS(&wctitlepane[i],0) - 6, 
-                           false, 
-                           0);
-            render_text_ex(&wctitlepane[i], 
-                           0, PANE_COLS(&wctitlepane[i],0) - 3,
-                           wc->image_res, 
-                           mode.mode == MODE_LIVE ? MOUSE_EVENT_WC_RES+i : MOUSE_EVENT_NONE,
-                           3,
-                           false, 
-                           0);
+            if (PANE_COLS(&wctitlepane[i],0) >= 1) {
+                render_text(&wctitlepane[i], 0, 0, win_id_str, MOUSE_EVENT_NONE);
+            }
+
+            if (PANE_COLS(&wctitlepane[i],0) >= 10) {
+                render_text_ex(&wctitlepane[i], 
+                            0, 2, 
+                            wc->image_name, 
+                            MOUSE_EVENT_WC_NAME+i,
+                            PANE_COLS(&wctitlepane[i],0) - 6, 
+                            false, 
+                            0);
+                render_text_ex(&wctitlepane[i], 
+                            0, PANE_COLS(&wctitlepane[i],0) - 3,
+                            wc->image_res, 
+                            mode.mode == MODE_LIVE ? MOUSE_EVENT_WC_RES+i : MOUSE_EVENT_NONE,
+                            3,
+                            false, 
+                            0);
+            } else if (PANE_COLS(&wctitlepane[i],0) >= 3) {
+                render_text_ex(&wctitlepane[i], 
+                            0, 2, 
+                            wc->image_name, 
+                            MOUSE_EVENT_WC_NAME+i,
+                            PANE_COLS(&wctitlepane[i],0) - 2, 
+                            false, 
+                            0);
+            }
 
             // display webcam_names
             if (wc->name_select_mode) {
@@ -1343,9 +1425,12 @@ void display_handler(void)
             // display image notification text lines
             } else {
                 int r = PANE_ROWS(&wcimagepane[i],0) / 2;
-                render_text_ex(&wcimagepane[i], r-1, 0, wc->image_notification_str1, MOUSE_EVENT_NONE, 0, true, 0);
-                render_text_ex(&wcimagepane[i], r,   0, wc->image_notification_str2, MOUSE_EVENT_NONE, 0, true, 0);
-                render_text_ex(&wcimagepane[i], r+1, 0, wc->image_notification_str3, MOUSE_EVENT_NONE, 0, true, 0);
+                render_text_ex(&wcimagepane[i], r-1, 0, wc->image_notification_str1, MOUSE_EVENT_NONE, 
+                               PANE_COLS(&wcimagepane[i],0), true, 0);
+                render_text_ex(&wcimagepane[i], r,   0, wc->image_notification_str2, MOUSE_EVENT_NONE, 
+                               PANE_COLS(&wcimagepane[i],0), true, 0);
+                render_text_ex(&wcimagepane[i], r+1, 0, wc->image_notification_str3, MOUSE_EVENT_NONE, 
+                               PANE_COLS(&wcimagepane[i],0), true, 0);
 
                 // register for the zoom event
                 event.mouse_event_pos[MOUSE_EVENT_WC_ZOOM+i] = wcimagepane[i];
@@ -1466,7 +1551,9 @@ void display_handler(void)
     // CONFIG  QUIT    
 
     // status display
-    if ((mode.mode == MODE_LIVE) || (mode.mode == MODE_PLAYBACK)) {
+    if ((mode.mode == MODE_LIVE && PANE_ROWS(&ctlpane,0) >= 12) || 
+        (mode.mode == MODE_PLAYBACK && PANE_ROWS(&ctlpane,0) >= 25)) 
+    {
         switch (status_select) {
 
         case 0: {  // FRAMES/SEC
@@ -1569,8 +1656,12 @@ void display_handler(void)
     }
 
     // Config/Back and Quit
-    render_text(&ctlbpane, 6, 0, !config_mode ? "CONFIG" : "BACK", MOUSE_EVENT_CONFIG_SELECT);
-    render_text(&ctlbpane, 6, 10, "QUIT", MOUSE_EVENT_QUIT);
+    if ((mode.mode == MODE_LIVE && PANE_ROWS(&ctlpane,0) >= 6) || 
+        (mode.mode == MODE_PLAYBACK && PANE_ROWS(&ctlpane,0) >= 19)) 
+    {
+        render_text(&ctlbpane, 6, 0, !config_mode ? "CONFIG" : "BACK", MOUSE_EVENT_CONFIG_SELECT);
+        render_text(&ctlbpane, 6, 10, "QUIT", MOUSE_EVENT_QUIT);
+    }
 
     // -----------------
     // ---- present ----
@@ -1581,7 +1672,7 @@ void display_handler(void)
 
 void render_text(SDL_Rect * pane, int row, int col, char * str, int mouse_event)
 {
-    render_text_ex(pane, row, col, str, mouse_event, 0, false, 0);
+    render_text_ex(pane, row, col, str, mouse_event, PANE_COLS(pane,0), false, 0);
 }
 
 void render_text_ex(SDL_Rect * pane, int row, int col, char * str, int mouse_event, int field_cols, bool center, int font_id)
@@ -1609,12 +1700,9 @@ void render_text_ex(SDL_Rect * pane, int row, int col, char * str, int mouse_eve
         return;
     }
 
-    // if field_cols not supplied then determine it
-    if (field_cols == 0) {
-        field_cols = PANE_COLS(pane,font_id) - col;
-        if (field_cols <= 0) {
-            return;
-        }
+    // verify field_cols
+    if (field_cols <= 0) {
+         return;
     }
 
     // make a copy of the str arg, and shorten if necessary
@@ -2061,7 +2149,8 @@ void * webcam_thread(void * cx)
 
     // exit thread
     __sync_fetch_and_add(&webcam_threads_running_count,-1);
-    INFO("THREAD %d TERMINATING\n", id);
+    INFO("THREAD %d TERMINATING, quit_event=%d fatal_error=%d\n", 
+         id, event.quit_event, wc->state == STATE_FATAL_ERROR);
     return NULL;
 }
 
