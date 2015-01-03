@@ -632,7 +632,7 @@ void convert_yuy2_to_gs(uint8_t * yuy2, uint8_t * gs, int pixels)
 // -----------------  TIME UTILS  -----------------------------------------
 
 int64_t system_clock_offset_us;
-static void sntp_query(bool aggressive);
+static void sntp_query(void);
 
 uint64_t microsec_timer(void)
 {
@@ -719,10 +719,10 @@ void real_time_init(void)
     }
 
     // determine real_time_clock_offset using sntp
-    sntp_query(true);
+    sntp_query();
 }
 
-static void sntp_query(bool aggressive)
+static void sntp_query(void)
 {
     #define MAX_SERVER_LIST     (sizeof(server_name_list)/sizeof(char*))
     #define NTP_PORT            123
@@ -755,7 +755,6 @@ static void sntp_query(bool aggressive)
                                                "3.pool.ntp.org",
                                                      };
 
-    int                n = (aggressive == false ? 1 : MAX_SERVER_LIST);
     uint32_t           request[12];
     uint32_t           response[12];
     int                sfd, i, recvlen;
@@ -786,7 +785,7 @@ static void sntp_query(bool aggressive)
     }
 
     // loop over the list of candidate ntp servers
-    for (i = 0; i < n; i++) {
+    for (i = 0; i < MAX_SERVER_LIST; i++) {
         char * server_name = server_name_list[i];
 
         // get server address
@@ -895,8 +894,8 @@ static void sntp_query(bool aggressive)
     close(sfd);
 
     // if failed then print error
-    if (i == n) {
-        ERROR("failed to determine system_clock_offset_us, tried %d times\n", n);
+    if (i == MAX_SERVER_LIST) {
+        ERROR("failed to determine system_clock_offset_us\n");
     }
 }
     
