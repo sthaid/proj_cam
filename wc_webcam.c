@@ -1182,7 +1182,11 @@ void compare_gs_image(uint8_t * gs1, uint32_t gs1_w, uint32_t gs1_h, uint8_t * g
     // - at least two boxex have 5% pixels different
     // - at least three boxex have 3% pixels different
     *motion = (box10cnt >= 1 || box5cnt >= 2 || box3cnt >= 3);
-    *motion = true; //ZZZ temp test
+
+#if 0  
+    // enable this to simulate continuous motion
+    *motion = true;
+#endif
 
     // determine pixel average brightness difference;
     // set brightness_change_detected if  pixel average has changed by 5
