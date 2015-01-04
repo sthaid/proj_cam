@@ -242,7 +242,7 @@ int p2p1_connect(char * user_name, char * password, char * wc_name, int service,
         goto error_ret;
     }
 
-    // bind  XXX still wonder why I need get_local_addr, just use INADDR_ANY instead
+    // bind 
     ret = get_local_addr(&local_addr);
     if (ret == -1) {
         ERROR("get_local_addr %s\n", strerror(errno));
