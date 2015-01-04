@@ -6,9 +6,9 @@
 #include <SDL_mixer.h>
 
 // XXX changing Android orientatiton not always working
-// XXX portrait mode
 // XXX should handle SDL_WINDOWEVENT_FOCUS_LOST and GAINED
 //     or MINIMIZED / RESTORED,   stop updating display and pause connection ??
+//     or add a new mode called PAUSED
 
 // ZZZ review all struct fields
 // ZZZ mode locking
@@ -18,13 +18,15 @@
 //
 
 #define MAX_WEBCAM                  4
-#define MAX_STR                     200  //ZZZ delete or search and pick more reasonable size
+#define MAX_STR                     200 
 
 #define WIN_WIDTH_INITIAL           1280
 #define WIN_HEIGHT_INITIAL          800
-#define CTL_COLS                    14
-#define CTL_WIDTH                   (CTL_COLS * font[0].char_width)
-#define CTLB_ROWS                   7
+
+#define CTL_COLS_LANDSCAPE          14
+#define CTLB_ROWS_LANDSCAPE         7
+#define CTL_ROWS_PORTRAIT           7 
+#define KEYBD_STR_COLS              14
 
 #define MS                          1000
 #define HIGHLIGHT_TIME_US           (2000*MS)
@@ -60,7 +62,7 @@
 #define FONT0_PATH                   "/system/fonts/DroidSansMono.ttf"
 #define FONT0_PTSIZE                 24
 #define FONT1_PATH                   "/system/fonts/DroidSansMono.ttf"
-#define FONT1_PTSIZE                 50
+#define FONT1_PTSIZE                 40 
 #endif
 
 #define MAX_MOUSE_EVENT                       256
@@ -626,6 +628,9 @@ void display_handler(void)
                                (ev.button.y >= (pos).y - 5) && \
                                (ev.button.y < (pos).y + (pos).h + 5))
 
+    #define LANDSCAPE() (win_width >= win_height)
+    #define PORTRAIT()  (!LANDSCAPE())
+
     #define SDL_WINDOWEVENT_STR(x) \
        ((x) == SDL_WINDOWEVENT_SHOWN        ? "SDL_WINDOWEVENT_SHOWN"        : \
         (x) == SDL_WINDOWEVENT_HIDDEN       ? "SDL_WINDOWEVENT_HIDDEN"       : \
@@ -658,7 +663,7 @@ void display_handler(void)
     SDL_Rect    wcimagepane[MAX_WEBCAM];
 
     static int  config_keybd_mode;
-    static int  config_mode;
+    static bool config_mode;
     static char config_keybd_str[MAX_STR];
     static bool config_keybd_shift;
     static int  status_select;
@@ -1147,56 +1152,115 @@ void display_handler(void)
     // --------------------------------------------
     // ---- reinit the list of positions       ----
     // --------------------------------------------
-
     bzero(event.mouse_event_pos, sizeof(event.mouse_event_pos));
 
-    INIT_POS(ctlpane, 
-             win_width-CTL_WIDTH, 0,     // x, y
-             CTL_WIDTH, win_height);     // w, h
-    INIT_POS(ctlbpane, 
-             win_width-CTL_WIDTH, win_height-CTLB_ROWS*font[0].char_height,
-             CTL_WIDTH, CTLB_ROWS*font[0].char_height);
-    INIT_POS(keybdpane,
-             0, 0,
-             win_width-CTL_WIDTH, win_height);
+    if (LANDSCAPE()) {
+        // landscape ...
 
-    int small_win_count = 0;
-    for (i = 0; i < MAX_WEBCAM; i++) {
-        int wc_x, wc_y, wc_w, wc_h;
+        #define CTL_WIDTH  (CTL_COLS_LANDSCAPE * font[0].char_width)
 
-        if (CONFIG_ZOOM >= 'A' && CONFIG_ZOOM <= 'D') {
-            int wc_zw = (double)(win_width - CTL_WIDTH) / 1.33;
-            if ('A'+i == CONFIG_ZOOM) {
-                wc_x = 0;
-                wc_y = 0;
-                wc_w = wc_zw;
-                wc_h = win_height;
+        INIT_POS(ctlpane, 
+                 win_width-CTL_WIDTH, 0,     // x, y
+                 CTL_WIDTH, win_height);     // w, h
+        INIT_POS(ctlbpane, 
+                 win_width-CTL_WIDTH, win_height-CTLB_ROWS_LANDSCAPE*font[0].char_height,
+                 CTL_WIDTH, CTLB_ROWS_LANDSCAPE*font[0].char_height);
+        INIT_POS(keybdpane,
+                 0, 0,
+                 win_width-CTL_WIDTH, win_height);
+
+        int small_win_count = 0;
+        for (i = 0; i < MAX_WEBCAM; i++) {
+            int wc_x, wc_y, wc_w, wc_h;
+
+            if (CONFIG_ZOOM >= 'A' && CONFIG_ZOOM <= 'D') {
+                int wc_zw = (double)(win_width - CTL_WIDTH) / 1.33;
+                if ('A'+i == CONFIG_ZOOM) {
+                    wc_x = 0;
+                    wc_y = 0;
+                    wc_w = wc_zw;
+                    wc_h = win_height;
+                } else {
+                    wc_x = wc_zw;
+                    wc_y = small_win_count * (win_height / 3);
+                    wc_w = win_width - CTL_WIDTH - wc_zw;
+                    wc_h = (win_height / 3);
+                    small_win_count++;
+                }
             } else {
-                wc_x = wc_zw;
-                wc_y = small_win_count * (win_height / 3);
-                wc_w = win_width - CTL_WIDTH - wc_zw;
-                wc_h = (win_height / 3);
-                small_win_count++;
+                wc_w = (win_width - CTL_WIDTH) / 2;
+                wc_h = win_height / 2;
+                switch (i) {
+                case 0: wc_x = 0;    wc_y = 0;    break;
+                case 1: wc_x = wc_w; wc_y = 0;    break;
+                case 2: wc_x = 0;    wc_y = wc_h; break;
+                case 3: wc_x = wc_w; wc_y = wc_h; break;
+                }
             }
-        } else {
-            wc_w = (win_width - CTL_WIDTH) / 2;
-            wc_h = win_height / 2;
-            switch (i) {
-            case 0: wc_x = 0;    wc_y = 0;    break;
-            case 1: wc_x = wc_w; wc_y = 0;    break;
-            case 2: wc_x = 0;    wc_y = wc_h; break;
-            case 3: wc_x = wc_w; wc_y = wc_h; break;
-            }
+            INIT_POS(wcpane[i], 
+                     wc_x, wc_y, 
+                     wc_w, wc_h);
+            INIT_POS(wctitlepane[i],
+                     wc_x + 1, wc_y + 1,
+                     wc_w - 2, font[0].char_height);
+            INIT_POS(wcimagepane[i],
+                     wc_x + 1, wc_y + 2 + font[0].char_height,
+                     wc_w - 2, wc_h - font[0].char_height - 3);
         }
-        INIT_POS(wcpane[i], 
-                 wc_x, wc_y, 
-                 wc_w, wc_h);
-        INIT_POS(wctitlepane[i],
-                 wc_x + 1, wc_y + 1,
-                 wc_w - 2, font[0].char_height);
-        INIT_POS(wcimagepane[i],
-                 wc_x + 1, wc_y + 2 + font[0].char_height,
-                 wc_w - 2, wc_h - font[0].char_height - 3);
+    } else {
+        // portrait ...
+
+        #define CTL_HEIGHT  (CTL_ROWS_PORTRAIT * font[0].char_height)
+        #define CTLB_WIDTH  (14 * font[0].char_width)
+
+        INIT_POS(ctlpane, 
+                 0, win_height-CTL_HEIGHT,   // x, y
+                 win_width, CTL_HEIGHT);     // w, h
+        INIT_POS(ctlbpane, 
+                 win_width-CTLB_WIDTH, win_height-CTL_HEIGHT,
+                 CTLB_WIDTH, CTL_HEIGHT);
+        INIT_POS(keybdpane,
+                 0, 0,
+                 win_width, win_height-CTL_HEIGHT);
+
+        int small_win_count = 0;
+        for (i = 0; i < MAX_WEBCAM; i++) {
+            int wc_x, wc_y, wc_w, wc_h;
+
+            if (CONFIG_ZOOM >= 'A' && CONFIG_ZOOM <= 'D') {
+                int wc_zh = (double)(win_height - CTL_HEIGHT) * 0.75;
+                if ('A'+i == CONFIG_ZOOM) {
+                    wc_x = 0;
+                    wc_y = 0;
+                    wc_w = win_width;
+                    wc_h = wc_zh;
+                } else {
+                    wc_x = small_win_count * (win_width / 3);
+                    wc_y = wc_zh;
+                    wc_w = win_width / 3;
+                    wc_h = win_height - CTL_HEIGHT - wc_zh;
+                    small_win_count++;
+                }
+            } else {
+                wc_w = win_width / 2;
+                wc_h = (win_height - CTL_HEIGHT) / 2;
+                switch (i) {
+                case 0: wc_x = 0;    wc_y = 0;    break;
+                case 1: wc_x = wc_w; wc_y = 0;    break;
+                case 2: wc_x = 0;    wc_y = wc_h; break;
+                case 3: wc_x = wc_w; wc_y = wc_h; break;
+                }
+            }
+            INIT_POS(wcpane[i], 
+                     wc_x, wc_y, 
+                     wc_w, wc_h);
+            INIT_POS(wctitlepane[i],
+                     wc_x + 1, wc_y + 1,
+                     wc_w - 2, font[0].char_height);
+            INIT_POS(wcimagepane[i],
+                     wc_x + 1, wc_y + 2 + font[0].char_height,
+                     wc_w - 2, wc_h - font[0].char_height - 3);
+        }
     }
 
     // ---------------------------------
@@ -1230,59 +1294,114 @@ void display_handler(void)
         // LOCALTIME
         // OFF=5000 MS
 
-        // title line
-        render_text(&ctlpane, 0, 0, "CONFIGURE", MOUSE_EVENT_NONE);
+        if (LANDSCAPE()) {
+            // title line
+            render_text(&ctlpane, 0, 0, "CONFIGURE", MOUSE_EVENT_NONE);
 
-        // server section
-        render_text(&ctlpane, 2, 0, "-- SERVER --", MOUSE_EVENT_NONE);
+            // server section
+            render_text(&ctlpane, 2, 0, "-- SERVER --", MOUSE_EVENT_NONE);
 
-        if (config_keybd_mode == CONFIG_KEYBD_MODE_USERNAME) {
-            bool cursor_blink_on = ((curr_us % 1000000) > 500000);
-            len = strlen(config_keybd_str);
-            strcpy(str, len < CTL_COLS ? config_keybd_str : config_keybd_str + (len-CTL_COLS+1));
-            if (cursor_blink_on) {
-                strcat(str, "_");
+            if (config_keybd_mode == CONFIG_KEYBD_MODE_USERNAME) {
+                bool cursor_blink_on = ((curr_us % 1000000) > 500000);
+                len = strlen(config_keybd_str);
+                strcpy(str, len < KEYBD_STR_COLS ? config_keybd_str : config_keybd_str + (len-KEYBD_STR_COLS+1));
+                if (cursor_blink_on) {
+                    strcat(str, "_");
+                }
+            } else {
+                strcpy(str, CONFIG_USERNAME);
             }
-        } else {
-            strcpy(str, CONFIG_USERNAME);
-        }
-        len = strlen(str);
-        render_text(&ctlpane, 3, 0, str, MOUSE_EVENT_CONFIG_USERNAME);
+            len = strlen(str);
+            render_text(&ctlpane, 3, 0, str, MOUSE_EVENT_CONFIG_USERNAME);
 
-        if (config_keybd_mode == CONFIG_KEYBD_MODE_PASSWORD) {
-            bool cursor_blink_on = ((curr_us % 1000000) > 500000);
-            len = strlen(config_keybd_str);
-            strcpy(str, len < CTL_COLS ? config_keybd_str : config_keybd_str + (len-CTL_COLS+1));
-            if (cursor_blink_on) {
-                strcat(str, "_");
+            if (config_keybd_mode == CONFIG_KEYBD_MODE_PASSWORD) {
+                bool cursor_blink_on = ((curr_us % 1000000) > 500000);
+                len = strlen(config_keybd_str);
+                strcpy(str, len < KEYBD_STR_COLS ? config_keybd_str : config_keybd_str + (len-KEYBD_STR_COLS+1));
+                if (cursor_blink_on) {
+                    strcat(str, "_");
+                }
+            } else if (strcmp(CONFIG_PASSWORD, NO_PASSWORD) == 0) {
+                strcpy(str, NO_PASSWORD);
+            } else {
+                strcpy(str, "********");
             }
-        } else if (strcmp(CONFIG_PASSWORD, NO_PASSWORD) == 0) {
-            strcpy(str, NO_PASSWORD);
+            render_text(&ctlpane, 5, 0, str, MOUSE_EVENT_CONFIG_PASSWORD);
+
+            render_text(&ctlpane, 7, 0, "SERVER_CHECK", MOUSE_EVENT_CONFIG_SERVER_CHECK);
+            render_text(&ctlpane, 8, 0, status2str(server_check_status), MOUSE_EVENT_NONE);
+            if (server_check_status == STATUS_INFO_OK) {
+                sprintf(str, ": WC_CNT=%d", max_webcam_names-1);
+                render_text(&ctlpane, 8, 2, str, MOUSE_EVENT_NONE);
+            }
+
+            // network section
+            render_text(&ctlpane, 10, 0, "-- NETWORK --", MOUSE_EVENT_NONE);
+            render_text(&ctlpane, 11, 0, 
+                        CONFIG_PROXY == 'N' ? "PROXY DISABLED" : "PROXY ENABLED",
+                        MOUSE_EVENT_CONFIG_PROXY);
+
+            // time section
+            render_text(&ctlpane, 13, 0, "-- TIME --", MOUSE_EVENT_NONE);
+            render_text(&ctlpane, 14, 0, 
+                        CONFIG_LOCALTIME == 'N' ? "GMT" : "LOCALTIME",
+                        MOUSE_EVENT_CONFIG_TIME);
+            sprintf(str, "OFF=%"PRId64" MS", system_clock_offset_us/1000);
+            render_text(&ctlpane, 15, 0, str, MOUSE_EVENT_NONE);
         } else {
-            strcpy(str, "********");
+            // PORTRAIT ...
+            //
+            // server section
+            render_text(&ctlpane, 0, 0, "-- SERVER --", MOUSE_EVENT_NONE);
+
+            if (config_keybd_mode == CONFIG_KEYBD_MODE_USERNAME) {
+                bool cursor_blink_on = ((curr_us % 1000000) > 500000);
+                len = strlen(config_keybd_str);
+                strcpy(str, len < KEYBD_STR_COLS ? config_keybd_str : config_keybd_str + (len-KEYBD_STR_COLS+1));
+                if (cursor_blink_on) {
+                    strcat(str, "_");
+                }
+            } else {
+                strcpy(str, CONFIG_USERNAME);
+            }
+            len = strlen(str);
+            render_text(&ctlpane, 1, 0, str, MOUSE_EVENT_CONFIG_USERNAME);
+
+            if (config_keybd_mode == CONFIG_KEYBD_MODE_PASSWORD) {
+                bool cursor_blink_on = ((curr_us % 1000000) > 500000);
+                len = strlen(config_keybd_str);
+                strcpy(str, len < KEYBD_STR_COLS ? config_keybd_str : config_keybd_str + (len-KEYBD_STR_COLS+1));
+                if (cursor_blink_on) {
+                    strcat(str, "_");
+                }
+            } else if (strcmp(CONFIG_PASSWORD, NO_PASSWORD) == 0) {
+                strcpy(str, NO_PASSWORD);
+            } else {
+                strcpy(str, "********");
+            }
+            render_text(&ctlpane, 3, 0, str, MOUSE_EVENT_CONFIG_PASSWORD);
+
+            render_text(&ctlpane, 5, 0, "SERVER_CHECK", MOUSE_EVENT_CONFIG_SERVER_CHECK);
+            render_text(&ctlpane, 6, 0, status2str(server_check_status), MOUSE_EVENT_NONE);
+            if (server_check_status == STATUS_INFO_OK) {
+                sprintf(str, ": WC_CNT=%d", max_webcam_names-1);
+                render_text(&ctlpane, 6, 2, str, MOUSE_EVENT_NONE);
+            }
+
+            // network section
+            render_text(&ctlpane, 0, 18, "-- NETWORK --", MOUSE_EVENT_NONE);
+            render_text(&ctlpane, 1, 18, 
+                        CONFIG_PROXY == 'N' ? "PROXY DISABLED" : "PROXY ENABLED",
+                        MOUSE_EVENT_CONFIG_PROXY);
+
+            // time section
+            render_text(&ctlpane, 3, 18, "-- TIME --", MOUSE_EVENT_NONE);
+            render_text(&ctlpane, 4, 18, 
+                        CONFIG_LOCALTIME == 'N' ? "GMT" : "LOCALTIME",
+                        MOUSE_EVENT_CONFIG_TIME);
+            sprintf(str, "OFF=%"PRId64" MS", system_clock_offset_us/1000);
+            render_text(&ctlpane, 5, 18, str, MOUSE_EVENT_NONE);
         }
-        render_text(&ctlpane, 5, 0, str, MOUSE_EVENT_CONFIG_PASSWORD);
-
-        render_text(&ctlpane, 7, 0, "SERVER_CHECK", MOUSE_EVENT_CONFIG_SERVER_CHECK);
-        render_text(&ctlpane, 8, 0, status2str(server_check_status), MOUSE_EVENT_NONE);
-        if (server_check_status == STATUS_INFO_OK) {
-            sprintf(str, ": WC_CNT=%d", max_webcam_names-1);
-            render_text(&ctlpane, 8, 2, str, MOUSE_EVENT_NONE);
-        }
-
-        // network section
-        render_text(&ctlpane, 10, 0, "-- NETWORK --", MOUSE_EVENT_NONE);
-        render_text(&ctlpane, 11, 0, 
-                    CONFIG_PROXY == 'N' ? "PROXY DISABLED" : "PROXY ENABLED",
-                    MOUSE_EVENT_CONFIG_PROXY);
-
-        // time section
-        render_text(&ctlpane, 13, 0, "-- TIME --", MOUSE_EVENT_NONE);
-        render_text(&ctlpane, 14, 0, 
-                    CONFIG_LOCALTIME == 'N' ? "GMT" : "LOCALTIME",
-                    MOUSE_EVENT_CONFIG_TIME);
-        sprintf(str, "OFF=%"PRId64" MS", system_clock_offset_us/1000);
-        render_text(&ctlpane, 15, 0, str, MOUSE_EVENT_NONE);
     }
 
     // --------------------------------
@@ -1506,39 +1625,72 @@ void display_handler(void)
         }
         render_text(&ctlpane, 6, 0, str, MOUSE_EVENT_NONE);
 
-        // control: stop,play,pause
-        if (m.pb_submode == PB_SUBMODE_STOP) {
-            render_text(&ctlpane, 8, 0, "PLAY", MOUSE_EVENT_PLAYBACK_PLAY);
-            render_text(&ctlpane, 8, 8, "PAUSE", MOUSE_EVENT_PLAYBACK_PAUSE);
-        } else if (m.pb_submode == PB_SUBMODE_PLAY) {
-            render_text(&ctlpane, 8, 0, "STOP", MOUSE_EVENT_PLAYBACK_STOP);
-            render_text(&ctlpane, 8, 8, "PAUSE", MOUSE_EVENT_PLAYBACK_PAUSE);
-        } else if (m.pb_submode == PB_SUBMODE_PAUSE) {
-            render_text(&ctlpane, 8, 0, "STOP", MOUSE_EVENT_PLAYBACK_STOP);
-            render_text(&ctlpane, 8, 8, "PLAY", MOUSE_EVENT_PLAYBACK_PLAY);
+        if (LANDSCAPE()) {
+            // control: stop,play,pause
+            if (m.pb_submode == PB_SUBMODE_STOP) {
+                render_text(&ctlpane, 8, 0, "PLAY", MOUSE_EVENT_PLAYBACK_PLAY);
+                render_text(&ctlpane, 8, 8, "PAUSE", MOUSE_EVENT_PLAYBACK_PAUSE);
+            } else if (m.pb_submode == PB_SUBMODE_PLAY) {
+                render_text(&ctlpane, 8, 0, "STOP", MOUSE_EVENT_PLAYBACK_STOP);
+                render_text(&ctlpane, 8, 8, "PAUSE", MOUSE_EVENT_PLAYBACK_PAUSE);
+            } else if (m.pb_submode == PB_SUBMODE_PAUSE) {
+                render_text(&ctlpane, 8, 0, "STOP", MOUSE_EVENT_PLAYBACK_STOP);
+                render_text(&ctlpane, 8, 8, "PLAY", MOUSE_EVENT_PLAYBACK_PLAY);
+            } else {
+                render_text(&ctlpane, 8, 0, "????", MOUSE_EVENT_NONE);
+                render_text(&ctlpane, 8, 8, "????", MOUSE_EVENT_NONE);
+            }
+
+            // control: fwd,rev
+            render_text(&ctlpane, 10, 0, "REV", MOUSE_EVENT_PLAYBACK_REVERSE);
+            render_text(&ctlpane, 10, 8, "FWD", MOUSE_EVENT_PLAYBACK_FORWARD);
+
+            // control: fast,slow
+            render_text(&ctlpane, 12, 0, "SLOWER", MOUSE_EVENT_PLAYBACK_SLOWER);
+            render_text(&ctlpane, 12, 8, "FASTER", MOUSE_EVENT_PLAYBACK_FASTER);
+
+            // control: hour-, hour+,min-,min+
+            render_text(&ctlpane, 14, 0, "HOUR-", MOUSE_EVENT_PLAYBACK_HOUR_MINUS);
+            render_text(&ctlpane, 14, 8, "HOUR+", MOUSE_EVENT_PLAYBACK_HOUR_PLUS);
+            render_text(&ctlpane, 16, 0, "MIN-",  MOUSE_EVENT_PLAYBACK_MINUTE_MINUS);
+            render_text(&ctlpane, 16, 8, "MIN+",  MOUSE_EVENT_PLAYBACK_MINUTE_PLUS);
         } else {
-            render_text(&ctlpane, 8, 0, "????", MOUSE_EVENT_NONE);
-            render_text(&ctlpane, 8, 8, "????", MOUSE_EVENT_NONE);
+            // PORTRAIT ...
+            //
+            // control: stop,play,pause
+            if (m.pb_submode == PB_SUBMODE_STOP) {
+                render_text(&ctlpane, 0, 16, "PLAY", MOUSE_EVENT_PLAYBACK_PLAY);
+                render_text(&ctlpane, 0, 29, "PAUSE", MOUSE_EVENT_PLAYBACK_PAUSE);
+            } else if (m.pb_submode == PB_SUBMODE_PLAY) {
+                render_text(&ctlpane, 0, 16, "STOP", MOUSE_EVENT_PLAYBACK_STOP);
+                render_text(&ctlpane, 0, 29, "PAUSE", MOUSE_EVENT_PLAYBACK_PAUSE);
+            } else if (m.pb_submode == PB_SUBMODE_PAUSE) {
+                render_text(&ctlpane, 0, 16, "STOP", MOUSE_EVENT_PLAYBACK_STOP);
+                render_text(&ctlpane, 0, 29, "PLAY", MOUSE_EVENT_PLAYBACK_PLAY);
+            } else {
+                render_text(&ctlpane, 0, 16, "????", MOUSE_EVENT_NONE);
+                render_text(&ctlpane, 0, 29, "????", MOUSE_EVENT_NONE);
+            }
+
+            // control: fwd,rev
+            render_text(&ctlpane, 2, 16, "REV", MOUSE_EVENT_PLAYBACK_REVERSE);
+            render_text(&ctlpane, 2, 29, "FWD", MOUSE_EVENT_PLAYBACK_FORWARD);
+
+            // control: fast,slow
+            render_text(&ctlpane, 4, 16, "SLOWER", MOUSE_EVENT_PLAYBACK_SLOWER);
+            render_text(&ctlpane, 4, 29, "FASTER", MOUSE_EVENT_PLAYBACK_FASTER);
+
+            // control: hour-, hour+,min-,min+
+            render_text(&ctlpane, 6, 12, "MIN-", MOUSE_EVENT_PLAYBACK_MINUTE_MINUS);
+            render_text(&ctlpane, 6, 19, "MIN+", MOUSE_EVENT_PLAYBACK_MINUTE_PLUS);
+            render_text(&ctlpane, 6, 26, "HOUR-", MOUSE_EVENT_PLAYBACK_HOUR_MINUS);
+            render_text(&ctlpane, 6, 34, "HOUR+", MOUSE_EVENT_PLAYBACK_HOUR_PLUS);
         }
-
-        // control: fwd,rev
-        render_text(&ctlpane, 10, 0, "REV", MOUSE_EVENT_PLAYBACK_REVERSE);
-        render_text(&ctlpane, 10, 8, "FWD", MOUSE_EVENT_PLAYBACK_FORWARD);
-
-        // control: fast,slow
-        render_text(&ctlpane, 12, 0, "SLOWER", MOUSE_EVENT_PLAYBACK_SLOWER);
-        render_text(&ctlpane, 12, 8, "FASTER", MOUSE_EVENT_PLAYBACK_FASTER);
-
-        // control: hour-, hour+,min-,min+
-        render_text(&ctlpane, 14, 0, "HOUR-", MOUSE_EVENT_PLAYBACK_HOUR_MINUS);
-        render_text(&ctlpane, 14, 8, "HOUR+", MOUSE_EVENT_PLAYBACK_HOUR_PLUS);
-        render_text(&ctlpane, 16, 0, "MIN-",  MOUSE_EVENT_PLAYBACK_MINUTE_MINUS);
-        render_text(&ctlpane, 16, 8, "MIN+",  MOUSE_EVENT_PLAYBACK_MINUTE_PLUS);
     }
 
-    // -----------------------------------------------
-    // ---- live & playback modes: ctlpane bottom ----
-    // -----------------------------------------------
+    // ---------------------------------------------------------
+    // ---- live, playback and config modes: ctlpane bottom ----
+    // ---------------------------------------------------------
 
     // Ctl Pane Bottom ...
     // 
@@ -1550,10 +1702,27 @@ void display_handler(void)
     // 
     // CONFIG  QUIT    
 
-    // status display
-    if ((mode.mode == MODE_LIVE && PANE_ROWS(&ctlpane,0) >= 12) || 
-        (mode.mode == MODE_PLAYBACK && PANE_ROWS(&ctlpane,0) >= 25)) 
-    {
+    bool okay = false;
+    if (LANDSCAPE()) {
+        if (config_mode) {
+            okay = PANE_ROWS(&ctlpane,0) >= 24;
+        } else if (mode.mode == MODE_LIVE) {
+            okay = PANE_ROWS(&ctlpane,0) >= 12;
+        } else if (mode.mode == MODE_PLAYBACK) {
+            okay = PANE_ROWS(&ctlpane,0) >= 25;
+        }
+    } else {
+        if (config_mode) {
+            okay = PANE_COLS(&ctlpane,0) >= 48;
+        } else if (mode.mode == MODE_LIVE) {
+            okay = PANE_COLS(&ctlpane,0) >= 24;
+        } else if (mode.mode == MODE_PLAYBACK) {
+            okay = PANE_COLS(&ctlpane,0) >= 55;
+        }
+    }
+
+    if (okay) {
+        // status display
         switch (status_select) {
 
         case 0: {  // FRAMES/SEC
@@ -1653,12 +1822,8 @@ void display_handler(void)
             break; }
 
         }
-    }
 
-    // Config/Back and Quit
-    if ((mode.mode == MODE_LIVE && PANE_ROWS(&ctlpane,0) >= 6) || 
-        (mode.mode == MODE_PLAYBACK && PANE_ROWS(&ctlpane,0) >= 19)) 
-    {
+        // config & quit
         render_text(&ctlbpane, 6, 0, !config_mode ? "CONFIG" : "BACK", MOUSE_EVENT_CONFIG_SELECT);
         render_text(&ctlbpane, 6, 10, "QUIT", MOUSE_EVENT_QUIT);
     }
@@ -1900,10 +2065,6 @@ void * webcam_thread(void * cx)
                          "");
 
             // attempt to connect to wc_name
-            //ZZZ can this now return a status
-            //     - p2p1 can receive a connect_reject packet, and there are other error paths
-            //     - p2p2 can get error status back from connect_from_admin_server
-            //     - should use STATUS_T
             h = p2p_connect(CONFIG_USERNAME, CONFIG_PASSWORD, wc->image_name, SERVICE_WEBCAM, &connect_status);
             if (h < 0) {  
                 STATE_CHANGE(STATE_CONNECTING_ERROR, "CONNECT ERROR", status2str(connect_status), "");
