@@ -6,11 +6,6 @@
 #include <sys/mman.h>
 #include <linux/videodev2.h>
 
-// XXX in overnight run it stopped receiving frames, perhaps ...
-//     - in live mode if no frames received by viewer, it can display that
-//     - in playback mode, should there always be frames received
-//     - can wc_webcam.c detect this and reinit;  could use non blocking on the dqbuf
-
 //
 // defines
 //
@@ -320,8 +315,7 @@ void * wc_svc_webcam(void * cx)
                 break;
 
             case MSG_TYPE_CMD_SET_MODE:
-// #ifdef DEBUG_PRINTS
-#if 1 //XXX
+#ifdef DEBUG_PRINTS
                 if (msg.u.mt_cmd_set_mode.mode == MODE_LIVE) {
                     INFO("received MSG_TYPE_CMD_SET_MODE - mode=%s\n", 
                           MODE_STR(msg.u.mt_cmd_set_mode.mode));
@@ -927,11 +921,6 @@ void * cam_thread(void * cx)
             continue;
         }
 
-        // ZZZ temp print flags
-        if (buffer.flags != 0x2005) {
-            INFO("BUFFER FLAGS 0x%x  rfc=%"PRId64"\n", buffer.flags, recvd_frame_count);
-        }
-
         // frame check - it is error if:
         // - time has gone backward
         // - time jumps forward more than 10 seconds
@@ -1502,7 +1491,8 @@ void * rp_write_file_frame_thread(void * cx)
             }
         } 
 
-        // XXX was else, comment this
+        // if the last frame written is a gap frame, then update the time
+        // the gap frame is valid through
         if (last_frame_is_gap) {
             uint64_t rt_us = get_real_time_us();
             if (rt_us > rp_file_hdr.last_frame_valid_through_real_time_us) {

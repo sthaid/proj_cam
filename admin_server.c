@@ -1432,8 +1432,6 @@ void * dgram_thread(void * cx)
             char                 s1[100], s2[100];
             int                  status = STATUS_ERR_GENERAL_FAILURE;
 
-            // XXX seeing a lot of prints here when attempting to connect to a wc not online
-
             // debug print the connect request
             INFO("recvd connect request from %s/%s user=%s wc_name=%s service=%s\n",
                    sock_addr_to_str(s1,sizeof(s1),(struct sockaddr*)client_addr),
@@ -1530,7 +1528,7 @@ connect_reject:
             for (k = 0; k < 3; k++) {
                 len = sendto(sfd, &dgram_snd, offsetof(dgram_t,u.connect_reject.dgram_end), 0,
                             (struct sockaddr *)client_addr, sizeof(struct sockaddr_in));
-                if (len != offsetof(dgram_t,u.connect_activate.dgram_end)) {
+                if (len != offsetof(dgram_t,u.connect_reject.dgram_end)) {
                     ERROR("send connect_reject to client\n");
                 }
             }

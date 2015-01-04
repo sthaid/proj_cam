@@ -5,13 +5,11 @@
 #include <SDL_ttf.h>
 #include <SDL_mixer.h>
 
+// XXX in live mode, if no frames are received then declare dead
+// XXX is locking needed around SDL_UpdateTexture
 // XXX changing Android orientatiton not always working
-// XXX should handle SDL_WINDOWEVENT_FOCUS_LOST and GAINED
-//     or MINIMIZED / RESTORED,   stop updating display and pause connection ??
-//     or add a new mode called PAUSED
-
-// ZZZ review all struct fields
-// ZZZ mode locking
+// XXX should handle SDL_WINDOWEVENT_MINIMIZED / RESTORED, pause data feed
+// XXX mode locking
 
 //
 // defines 
@@ -245,7 +243,7 @@
 // typedefs
 //
 
-typedef struct {//ZZZ comment fields sections
+typedef struct {
     uint32_t        state;
     struct mode_s   mode;
     struct status_s status; 
@@ -1529,7 +1527,7 @@ void display_handler(void)
                     DEBUG("created new texture %dx%d\n", wc->texture_w, wc->texture_h);
                 }
 
-                // update the texture with the image pixels  ZZZ LOCKING ?
+                // update the texture with the image pixels
                 SDL_UpdateTexture(wc->texture,
                                   NULL,            // update entire texture
                                   wc->image,       // pixels
