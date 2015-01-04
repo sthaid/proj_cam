@@ -5,7 +5,6 @@
 #include <SDL_ttf.h>
 #include <SDL_mixer.h>
 
-// XXX in live mode, if no frames are received then declare dead
 // XXX is locking needed around SDL_UpdateTexture
 // XXX changing Android orientatiton not always working
 // XXX should handle SDL_WINDOWEVENT_MINIMIZED / RESTORED, pause data feed
@@ -2007,6 +2006,7 @@ void * webcam_thread(void * cx)
 
     uint64_t         last_state_change_time_us = microsec_timer();
     uint64_t         last_status_msg_recv_time_us = microsec_timer();
+    uint64_t         last_frame_recv_time_us = microsec_timer();
     uint64_t         last_highlight_enable_time_us = microsec_timer();
     char             last_zoom = '-';
 
@@ -2072,6 +2072,7 @@ void * webcam_thread(void * cx)
             // connect succeeded; init variables for the new connection
             handle = h;
             last_status_msg_recv_time_us = microsec_timer();
+            last_frame_recv_time_us = microsec_timer();
             last_highlight_enable_time_us = microsec_timer();
             last_zoom = '-';  // invalid zoom value
             bzero(&wc->mode, sizeof(struct mode_s));
@@ -2089,9 +2090,25 @@ void * webcam_thread(void * cx)
             uint64_t     curr_us;
             char         int_str[MAX_INT_STR];
 
-            // if mode has changed then send message to webcam
+            // if mode has changed then 
+            // - perform initialization when entering the LIVE or PLAYBACK mode
+            // - send the new mode struct to the webcam
             if (wc->mode.mode_id != mode.mode_id) {
+                bool entering_live_mode;
+                bool entering_playback_mode;
+
+                entering_live_mode = (mode.mode == MODE_LIVE && wc->mode.mode != mode.mode);
+                entering_playback_mode = (mode.mode == MODE_PLAYBACK && wc->mode.mode != mode.mode);
                 wc->mode = mode;
+
+                if (entering_live_mode) {
+                    DISPLAY_TEXT("LIVE MODE", "", "");
+                    last_frame_recv_time_us = microsec_timer();
+                }
+                if (entering_playback_mode) {
+                    DISPLAY_TEXT("PLAYBACK MODE", "", "");
+                    last_frame_recv_time_us = microsec_timer();
+                }
 
 #ifdef DEBUG_PRINTS
                 // issue debug for new mode
@@ -2162,8 +2179,14 @@ void * webcam_thread(void * cx)
             }
 
             // if an error condition exists then display the error
-            if (curr_us - last_status_msg_recv_time_us > 10000000) {
-                DISPLAY_TEXT(status2str(STATUS_ERR_DEAD), "", "");
+            bool no_status_msg = (curr_us - last_status_msg_recv_time_us > 10000000);
+            bool no_live_frame = (mode.mode == MODE_LIVE && curr_us - last_frame_recv_time_us > 10000000);
+            if (no_status_msg || no_live_frame) {
+                char * info_str = (no_status_msg && no_live_frame ? "NOTHING RCVD" :
+                                   no_status_msg                  ? "NO STATUS MSG" :
+                                   no_live_frame                  ? "NO LIVE FRAME" :
+                                                                    "")
+                DISPLAY_TEXT(status2str(STATUS_ERR_DEAD), info_str, "");
             } else if (wc->mode.mode == MODE_LIVE && wc->status.cam_status != STATUS_INFO_OK) {
                 DISPLAY_TEXT(status2str(wc->status.cam_status), "", "");
             } else if (wc->mode.mode == MODE_PLAYBACK && wc->status.rp_status != STATUS_INFO_OK) {
@@ -2259,6 +2282,7 @@ void * webcam_thread(void * cx)
 
                 // display the image
                 wc->frame_status = STATUS_INFO_OK;
+                last_frame_recv_time_us = microsec_timer();
                 DISPLAY_IMAGE(image, width, height, msg.u.mt_frame.motion);
                 break;
 
