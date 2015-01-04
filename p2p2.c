@@ -6,9 +6,10 @@
 // defines
 //
 
-#define MAX_HANDLE 200  // android uses a lot of fds
+#define MAX_HANDLE          200  // android uses a lot of fds
+#define MAX_RECV_SAVE_BUFF  0x1000
 
-#define MILLISEC_TIMER  (microsec_timer() / 1000)
+#define MILLISEC_TIMER      (microsec_timer() / 1000)
 
 //
 // typedefs
@@ -22,7 +23,10 @@ typedef struct {
 typedef struct {
     bool            connected;
     bool            failed;
+    bool            recv_eof;
     pthread_mutex_t send_mutex;
+    void          * recv_save_buff;
+    uint32_t        recv_save_buff_len;
     stats_t         stats;
     pthread_t       mon_thread_id;
     bool            mon_thread_cancel_req;
@@ -69,6 +73,7 @@ static int p2p2_connect(char * user_name, char * password, char * wc_name, int s
 {
     char      service[100];
     int       handle;
+    void    * recv_save_buff;
     con_t   * con;
     pthread_t thread_id;
     int       tries = 0;
@@ -94,11 +99,21 @@ try_again:
         return -1;
     }
 
+    // allocate recv_save_buff
+    recv_save_buff = calloc(1,MAX_RECV_SAVE_BUFF);
+    if (recv_save_buff == NULL) {
+        ERROR("recv_save_buff alloc failed\n");
+        *connect_status = STATUS_ERR_CONNECTION_MEM_ALLOC;
+        close(handle);
+        return -1;
+    }
+
     // init con, non-zero fields only are set
     con = &con_tbl[handle];
     bzero(con, sizeof(con_t));
     con->connected = true;
     pthread_mutex_init(&con->send_mutex,NULL);
+    con->recv_save_buff = recv_save_buff;
 
     // create monitor thread
     pthread_create(&thread_id, NULL, monitor_thread, con);
@@ -140,7 +155,8 @@ static int p2p2_disconnect(int handle)
     // close handle
     ret = close(handle);
 
-    // reset fields in con to zero
+    // free allocation and reset fields in con to zero
+    free(con->recv_save_buff);
     bzero(con, sizeof(con_t));
 
     // return status
@@ -185,12 +201,42 @@ static int p2p2_send(int handle, void * buff, int len)
     return len_sent;
 }
 
-static int p2p2_recv(int handle, void * buff, int len, int mode)
+static int p2p2_recv(int handle, void * caller_buff, int caller_buff_len, int mode)
 {
-    int     len_recvd;
+    #define MIN(a,b) ((a) < (b) ? (a) : (b))
+        
+    #define COPY_SAVE_BUFF_TO_CALLER_BUFF(len) \
+        do { \
+            memcpy(caller_buff, \
+                   con->recv_save_buff, \
+                   (len)); \
+            memmove(con->recv_save_buff,  \
+                    con->recv_save_buff + (len),  \
+                    con->recv_save_buff_len - (len)); \
+            con->recv_save_buff_len -= (len); \
+        } while (0)
+
     con_t * con = NULL;
-    int     flags;
-    int     count;
+    int     ret_len, tmp_len;
+
+    // This routine is a bit involved. The reason for the complexity is to
+    // support mode RECV_NOWAIT_ALL. This mode will not block; if not enough
+    // data is available then RECV_WOULDBLOCK is returned, otherwise the 
+    // amount of data returned is the requested caller_buff_len.
+    //
+    // My first try at implementing this was to combine the MSG_WAITALL and 
+    // MSG_DONTWAIT flags. This did not provide the desired functionality.
+    //
+    // Second attempt was to use ioctl FIONREAD, which returns the number of
+    // bytes in the read socket. If there was not enough then RECV_WOULDBLOCK 
+    // was returned, otherwise recv would be called for the desired length.
+    // This worked well, except that when the other side of the connection
+    // disconnected, the FIONREAD does not return an error, causing this side
+    // not to disconnect.
+    //
+    // Third attempt is what we have below. A recv_save_buff is used to internally
+    // buffer received data when using the RECV_NOWAIT_ALL mode and the amount of
+    // data returned by nonblocking recv call is insufficient.
 
     // verify, and set ptr to con
     if (handle < 0 || handle >= MAX_HANDLE || 
@@ -202,57 +248,164 @@ static int p2p2_recv(int handle, void * buff, int len, int mode)
         return RECV_ERROR;
     }
 
-    // XXX RECV_NOWAIT_ALL is not working because the FIONREAD ioctl does
-    // not indicate when the other side has closed its socket; for now 
-    // replace with RECV_WAIT_ALL
-    if (mode == RECV_NOWAIT_ALL) {
-        mode = RECV_WAIT_ALL;
+    // check for eof, if so return RECV_EOF
+    if (con->recv_eof) {
+        return RECV_EOF;
     }
 
-    // if mode is non blocking recv of all data then check that
-    // the socket has at least len bytes available
-    if (mode == RECV_NOWAIT_ALL) {
-        if (ioctl(handle, FIONREAD, &count) < 0) {
-            ERROR("FIONREAD failed, %s\n", strerror(errno));
+    switch (mode) {
+    case RECV_WAIT_ANY:
+        // if data is in the recv_save_buffer then
+        //   copy the recv_save_buffer to caller_buffer    
+        //   return
+        // endif
+        if (con->recv_save_buff_len) {
+            ret_len = MIN(con->recv_save_buff_len, caller_buff_len);
+            COPY_SAVE_BUFF_TO_CALLER_BUFF(ret_len);
+            break;
+        }
+
+        // call recv to wait for any data
+        ret_len = recv(handle, caller_buff, caller_buff_len, 0);
+        if (ret_len == 0) {
+            con->recv_eof = true;
+            ret_len = RECV_EOF;
+        } else if (ret_len < 0) {
             con->failed = true;
-            return RECV_ERROR;
+            ret_len = RECV_ERROR;
         }
-        if (count < len) {
-            return RECV_WOULDBLOCK;
+        break;
+
+    case RECV_NOWAIT_ANY:
+        // if data is in the recv_save_buffer then
+        //   copy the recv_save_buffer to caller_buffer    
+        //   return
+        // endif
+        if (con->recv_save_buff_len) {
+            ret_len = MIN(con->recv_save_buff_len, caller_buff_len);
+            COPY_SAVE_BUFF_TO_CALLER_BUFF(ret_len);
+            break;
         }
-    }
 
-    // convert mode arg to flags to be passed to recv
-    if (mode == RECV_WAIT_ANY) {
-        flags = 0;
-    } else if (mode == RECV_WAIT_ALL) {
-        flags = MSG_WAITALL;
-    } else if (mode == RECV_NOWAIT_ANY  || mode == RECV_NOWAIT_ALL) {
-        flags = MSG_DONTWAIT;
-    } else {
-        ERROR("recv invalid mode %d\n", mode);
+        // call recv, non blocking
+        ret_len = recv(handle, caller_buff, caller_buff_len, MSG_DONTWAIT);
+        if (ret_len == 0) {
+            con->recv_eof = true;
+            ret_len = RECV_EOF;
+        } else if (ret_len < 0) {
+            ret_len = (errno == EWOULDBLOCK ? RECV_WOULDBLOCK : RECV_ERROR);
+            if (ret_len == RECV_ERROR) {
+                con->failed = true;
+            }
+        }
+        break;
+
+    case RECV_WAIT_ALL:
+        // if data is in the recv_save_buffer then
+        //   copy the recv_save_buffer to caller_buffer    
+        //   if caller_buffer is full then 
+        //     return
+        //   endif
+        // endif
+        ret_len = 0;
+        if (con->recv_save_buff_len) {
+            ret_len = MIN(con->recv_save_buff_len, caller_buff_len);
+            COPY_SAVE_BUFF_TO_CALLER_BUFF(ret_len);
+            if (ret_len == caller_buff_len) {
+                break;
+            }
+        }
+
+        // call recv, with wait-all, to read the remainder of
+        // data to fill the caller_buffer
+        tmp_len = recv(handle, caller_buff+ret_len, caller_buff_len-ret_len, MSG_WAITALL);
+        if (tmp_len == 0) {
+            if (ret_len == 0) {
+                con->recv_eof = true;
+                ret_len = RECV_EOF;
+            } else {
+                con->failed = true;
+                ret_len = RECV_ERROR;
+            }
+        } else if (tmp_len != caller_buff_len-ret_len) {
+            con->failed = true;
+            ret_len = RECV_ERROR;
+        } else {
+            ret_len = caller_buff_len;
+        }
+        break;
+
+    case RECV_NOWAIT_ALL:
+        // if enough data is in the recv_save_buffer to satisfy the request
+        //   copy the recv_save_buffer to caller_buffer    
+        //   return
+        // endif
+        if (con->recv_save_buff_len >= caller_buff_len) {
+            ret_len = caller_buff_len;
+            COPY_SAVE_BUFF_TO_CALLER_BUFF(ret_len);
+            break;
+        }
+
+        // call recv, non blocking; recv into the caller_buffer
+        tmp_len = recv(handle, 
+                       caller_buff+con->recv_save_buff_len, caller_buff_len-con->recv_save_buff_len, 
+                       MSG_DONTWAIT);
+
+        // if recv returned eof then
+        //   return eof or error 
+        // else if recv returned error then
+        //   return error
+        // else if this recv completes the request then
+        //   copy the recv_save_buffer to caller_buffer, and return success
+        // else
+        //   copy data recvd in caller_buffer to the recv_save_buffer, and return RECV_WOULDBLOCK
+        // endif
+        if (tmp_len == 0) {
+            if (con->recv_save_buff_len == 0) {
+                con->recv_eof = true;
+                ret_len = RECV_EOF;
+            } else {
+                con->failed = true;
+                ret_len = RECV_ERROR;
+            }
+        } else if (tmp_len < 0) {
+            ret_len = (errno == EWOULDBLOCK ? RECV_WOULDBLOCK : RECV_ERROR);
+            if (ret_len == RECV_ERROR) {
+                con->failed = true;
+            }
+        } else if (tmp_len ==  caller_buff_len - con->recv_save_buff_len) {
+            COPY_SAVE_BUFF_TO_CALLER_BUFF(con->recv_save_buff_len);
+            ret_len = caller_buff_len;
+        } else {
+            if (con->recv_save_buff_len + tmp_len > MAX_RECV_SAVE_BUFF) {
+                ERROR("recv_save_buff overflow, handle=%d, recv_save_buff_len=%d tmp_len=%d\n",
+                      handle, con->recv_save_buff_len, tmp_len);
+                con->failed = true;
+                ret_len = RECV_ERROR;
+                break;
+            }
+            memcpy(con->recv_save_buff+con->recv_save_buff_len,
+                   caller_buff+con->recv_save_buff_len,
+                   tmp_len);
+            con->recv_save_buff_len += tmp_len;
+            ret_len = RECV_WOULDBLOCK;
+        }
+        break;
+            
+    default: 
+        ERROR("invalid mode %d\n", mode);
         con->failed = true;
-        return RECV_ERROR;
-    }
-
-    // call recv
-    len_recvd = recv(handle, buff, len, flags);
-    if (len_recvd < 0) {
-        return errno == EWOULDBLOCK ? RECV_WOULDBLOCK : RECV_ERROR;
-    }
-
-    // verify len_recvd is valid for the modes which should return the entire len requested
-    if ((mode == RECV_WAIT_ALL || mode == RECV_NOWAIT_ALL) && len_recvd != len && len_recvd != RECV_EOF) {
-        ERROR("recv len_recvd=%d len=%d mode=%d %s\n", len_recvd, len, mode, strerror(errno));
-        con->failed = true;
-        return RECV_ERROR;
-    }
+        ret_len = RECV_ERROR;
+        break;
+    }    
 
     // update recvd_bytes stat
-    con->stats.recvd_bytes += len_recvd;
+    if (ret_len > 0) {
+        con->stats.recvd_bytes += ret_len;
+    }
 
-    // return len_recvd
-    return len_recvd;
+    // return ret_len
+    return ret_len;
 }
 
 static int p2p2_get_stats(int handle, p2p_stats_t * stats)
