@@ -398,7 +398,10 @@ int main(int argc, char **argv)
     logmsg_init(CONFIG_DEBUG == 'Y' ? "stderr" : "none");
     INFO("STARTING %s\n", argv[0]);
 
-    // init real time clock
+    // it is important that the viewer and the webcam raspberry pis have their 
+    // clocks in sync; the raspberry pis use ntp; unfortunately my Android tablet 
+    // (which runs viewer) does not have an option to sync to network time, so this
+    // call is made to sync the time that is returned to viewer by get_real_time_us
     real_time_init();
 
     // call server_check to verify login to admin server, and 
