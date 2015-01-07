@@ -88,7 +88,6 @@ int config_write(char * config_path, config_t * config, int config_version);
 #define MIN_USER_NAME                 4
 #define MIN_PASSWORD                  4
 
-
 #define HTTP_CONNECT_REQ  "CONNECT " ADMIN_SERVER_HOSTNAME ":80 HTTP/1.0\r\n\r\n"
 #define HTTP_CONNECT_RESP "HTTP/1.0 200 OK\r\n\r\n"
 
@@ -494,6 +493,26 @@ typedef struct {
 } webcam_msg_t;
 #pragma pack(pop)
 
+// -----------------  SERVICE_SHELL DEFINITIONS  -------------------------------------
+
+#define MAX_SHELL_DATA_LEN 10000
+
+#define BLOCK_ID_DATA         0x55667701
+#define BLOCK_ID_WINSIZE      0x55667702
+
+typedef struct {
+    uint32_t block_id;
+    union {
+        struct {
+            uint32_t len;
+        } block_id_data;
+        struct {
+            uint16_t rows;
+            uint16_t cols;
+        } block_id_winsize;
+    } u;
+} shell_msg_to_wc_hdr_t;
+
 // -----------------  TIMING CODE PATH EXECUTION  ------------------------------------
 
 #ifdef DEBUG_TIMING
@@ -564,6 +583,14 @@ typedef struct {
 
 #endif
 
+// -----------------  JPEG_DECODE  ---------------------------------------------------
+
+#define JPEG_DECODE_MODE_GS    1
+#define JPEG_DECODE_MODE_YUY2  2
+
+int jpeg_decode(uint32_t cxid, uint32_t jpeg_decode_mode, uint8_t * jpeg, uint32_t jpeg_size,
+                uint8_t ** out_buf, uint32_t * width, uint32_t * height);
+
 // -----------------  UTILS  ---------------------------------------------------------
 
 #define INFO(fmt, args...) \
@@ -627,10 +654,3 @@ uint64_t fs_avail_bytes(char * path);
 char * status2str(uint32_t status);
 char * int2str(char * str, int64_t n);
 
-// -----------------  JPEG_DECODE  ---------------------------------------------------
-
-#define JPEG_DECODE_MODE_GS    1
-#define JPEG_DECODE_MODE_YUY2  2
-
-int jpeg_decode(uint32_t cxid, uint32_t jpeg_decode_mode, uint8_t * jpeg, uint32_t jpeg_size,
-                uint8_t ** out_buf, uint32_t * width, uint32_t * height);

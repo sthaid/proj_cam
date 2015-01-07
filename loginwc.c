@@ -1,5 +1,7 @@
 #include "wc.h"
 
+// XXX p2p2 update for disconnect
+
 //
 // defines 
 //
@@ -10,12 +12,15 @@
 
 p2p_routines_t * p2p;
 int              handle;
+sigset_t         sig_set;
 
 //
 // prototypes
 //
 
-void * read_from_terminal_and_write_to_bash(void * cx);
+void * read_from_terminal_and_write_to_shell(void * cx);
+void * sigwinch_thread(void * cx);
+void send_window_size_msg(void);
 
 // -----------------  MAIN  ----------------------------------------------
 
@@ -27,7 +32,7 @@ int main(int argc, char **argv)
     char         * wc_name;
     pthread_t      thread;
     int            len, rc, connect_status;
-    char           buf[1000], opt_char;
+    char           buf[MAX_SHELL_DATA_LEN], opt_char;
     struct termios termios;
     struct termios termios_initial;
     bool           debug_mode = false;
@@ -93,6 +98,12 @@ int main(int argc, char **argv)
     }
     wc_name = argv[optind];
 
+    // perform initialization for the sigwinch_thread, this needs to be
+    // done prior to any pthread_create calls
+    sigemptyset(&sig_set);
+    sigaddset(&sig_set, SIGWINCH);
+    pthread_sigmask(SIG_BLOCK, &sig_set, NULL);
+
     // connect to the webcam
     handle = p2p_connect(user_name, password, wc_name, SERVICE_SHELL, &connect_status);
     if (handle < 0) {
@@ -106,15 +117,20 @@ int main(int argc, char **argv)
     cfmakeraw(&termios);
     tcsetattr(0, TCSANOW, &termios);
 
-    // create thread to read from terminal and write to bash
-    pthread_create(&thread, NULL, read_from_terminal_and_write_to_bash, NULL);
+    // create threads
+    pthread_create(&thread, NULL, sigwinch_thread, NULL);
+    pthread_create(&thread, NULL, read_from_terminal_and_write_to_shell, NULL);
 
-    // read from bash and write to terminal
+    // send window size to server
+    send_window_size_msg();
+
+    // read from shell and write to terminal
     while (true) {
         if ((len = p2p_recv(handle, buf, sizeof(buf), RECV_WAIT_ANY)) <= 0) {
             break;
         }
-        if ((rc = write(1, buf, len)) != len) {
+
+        if (write(1, buf, len) != len) {
             break;
         }
     }
@@ -130,20 +146,27 @@ int main(int argc, char **argv)
     return 0;
 }
 
-void * read_from_terminal_and_write_to_bash(void * cx)
+void * read_from_terminal_and_write_to_shell(void * cx)
 {
-    int  len, rc;
-    char buf[10000];
+    int  len;
+    char buf[MAX_SHELL_DATA_LEN + sizeof(shell_msg_to_wc_hdr_t)];
+    shell_msg_to_wc_hdr_t hdr;
 
     // detach because this thread will not be joined
     pthread_detach(pthread_self());
 
-    // read from terminal and write to bash
+    // read from terminal and write to shell
     while (true) {
-        if ((len = read(0, buf, sizeof(buf))) <= 0) {
+        // read from terminal, len is number of bytes read
+        if ((len = read(0, buf+sizeof(hdr), sizeof(buf)-sizeof(hdr))) <= 0) {
             break;
         }
-        if ((rc = p2p_send(handle, buf, len)) != len) {
+
+        // write to shell 
+        hdr.block_id = BLOCK_ID_DATA;
+        hdr.u.block_id_data.len = len;
+        memcpy(buf, &hdr, sizeof(hdr));
+        if (p2p_send(handle, buf, sizeof(hdr)+len) != sizeof(hdr)+len) {
             break;
         }
     }
@@ -153,4 +176,33 @@ void * read_from_terminal_and_write_to_bash(void * cx)
 
     // exit thread
     return NULL;
+}
+
+void * sigwinch_thread(void * cx)
+{
+    while (true) {
+        // wait for SIGWINCH signal
+        int signum = 0;
+        sigwait(&sig_set, &signum);
+
+        // call send_window_size which will read the new window size, and
+        // send window size to server
+        send_window_size_msg();
+    }
+
+    return NULL;
+}
+
+void send_window_size_msg(void)
+{
+    struct winsize ws;
+    shell_msg_to_wc_hdr_t hdr;
+
+    bzero(&ws, sizeof(ws));
+    ioctl(0, TIOCGWINSZ, &ws);
+
+    hdr.block_id = BLOCK_ID_WINSIZE;
+    hdr.u.block_id_winsize.rows = ws.ws_row;
+    hdr.u.block_id_winsize.cols = ws.ws_col;
+    p2p_send(handle, &hdr, sizeof(hdr));
 }

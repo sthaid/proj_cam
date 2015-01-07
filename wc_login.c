@@ -7,8 +7,6 @@
 //   /etc/security/access.conf and man page for pam.
 //
 
-// TBD LATER - window size when using vi, and SIGWINCH signal for resizing
-
 //
 // defines
 //
@@ -31,20 +29,22 @@ typedef struct {
 // prototypes
 //
 
-void * read_from_bash_and_write_to_client(void * cx);
+void * read_from_shell_and_write_to_client(void * cx);
 
 // -----------------  SERVICE SHELL  ----------------------------------------------------
 
 void * wc_svc_shell(void * cx)
 {
-    int           handle = (int)(long)cx;
-    int           fdm;
-    pthread_t     thread;
-    char        * slavename;
-    thread_cx_t * thread_cx;
-    pid_t         pid;
-    int           len, rc;
-    char          buf[10000];
+    int                   handle = (int)(long)cx;
+    int                   fdm;
+    pthread_t             thread;
+    char                * slavename;
+    thread_cx_t         * thread_cx;
+    pid_t                 pid;
+    int                   len, rc;
+    char                  buf[MAX_SHELL_DATA_LEN];
+    shell_msg_to_wc_hdr_t hdr;
+    struct winsize        ws;
 
     // init ptm - set fdm and slavename
     if ((fdm = open("/dev/ptmx", O_RDWR | O_NOCTTY | O_CLOEXEC)) < 0) {
@@ -71,7 +71,7 @@ void * wc_svc_shell(void * cx)
         open(slavename, O_RDWR);
         open(slavename, O_RDWR);
 
-        // exec bash
+        // exec /bin/bash
 #if 1
         char * envp[] = { "TERM=xterm", "HOME=/home/pi", (char*)NULL };
         execle("/bin/bash", "-", (char*)NULL, envp);
@@ -83,36 +83,58 @@ void * wc_svc_shell(void * cx)
 
     // parent executes here ...
 
-    // create thread to read from client and sent to bash
+    // create thread to read from client and sent to shell
     thread_cx = malloc(sizeof(thread_cx_t));
     thread_cx->handle           = handle;
     thread_cx->fdm              = fdm;
     thread_cx->p2p_disconnected = false;
-    pthread_create(&thread, NULL, read_from_bash_and_write_to_client, thread_cx);
+    pthread_create(&thread, NULL, read_from_shell_and_write_to_client, thread_cx);
 
-    // read from client and write to bash
+    // read from client and, based on received block_id either:
+    // - send data to shell, OR
+    // - set new window size
     while (true) {
-        if ((len = p2p_recv(handle, buf, sizeof(buf), RECV_WAIT_ANY)) <= 0) {
-            break;
+        if ((rc = p2p_recv(handle, &hdr, sizeof(hdr), RECV_WAIT_ALL)) != sizeof(hdr)) {
+            goto done;
         }
-        if ((rc = write(thread_cx->fdm, buf, len)) != len) {
+
+        switch (hdr.block_id) {
+        case BLOCK_ID_DATA:
+            len = hdr.u.block_id_data.len;
+            if (len > MAX_SHELL_DATA_LEN) {
+                goto done;
+            }
+            if ((rc=p2p_recv(handle, buf, len, RECV_WAIT_ALL)) != len) {
+                goto done;  
+            }
+            if (write(thread_cx->fdm, buf, len) != len) {
+                goto done;  
+            }
             break;
+
+        case BLOCK_ID_WINSIZE:
+            bzero(&ws, sizeof(ws));
+            ws.ws_row = hdr.u.block_id_winsize.rows;
+            ws.ws_col = hdr.u.block_id_winsize.cols;
+            rc = ioctl(thread_cx->fdm, TIOCSWINSZ, &ws);
+            break;
+
+        default:
+            ERROR("hdr.block_id 0x%x invalid\n", hdr.block_id);
+            goto done;
         }
     }
 
-    // close pseudo term master
-    close(fdm);
-
-    // p2p_disconnect
-    p2p_disconnect(handle);
-
-    // wait for thread to exit  
-    pthread_join(thread,NULL);
-
-    // wait for bash to exit
-    waitpid(pid, NULL, 0);
-
+done:
+    // close pseudo term master,
+    // p2p_disconnect,
+    // wait for thread to exit  ,
+    // wait for shell to exit,
     // free thread_cx
+    close(fdm);
+    p2p_disconnect(handle);
+    pthread_join(thread,NULL);
+    waitpid(pid, NULL, 0);
     free(thread_cx);
 
     // done
@@ -120,18 +142,18 @@ void * wc_svc_shell(void * cx)
     return NULL;
 }
     
-void * read_from_bash_and_write_to_client(void * cx)
+void * read_from_shell_and_write_to_client(void * cx)
 {
     thread_cx_t * thread_cx = cx;
-    int           len, rc;
-    char          buf[10000];
+    int           len;
+    char          buf[MAX_SHELL_DATA_LEN];
 
-    // read from bash and write to client
+    // read from shell and write to client
     while (true) {
         if ((len = read(thread_cx->fdm, buf, sizeof(buf))) <= 0) {
             break;
         }
-        if ((rc = p2p_send(thread_cx->handle, buf, len)) != len) {
+        if (p2p_send(thread_cx->handle, buf, len) != len) {
             break;
         }
     }
