@@ -11,7 +11,7 @@
 // defines
 //
 
-#define MAX_CON                       8      // must be power of 2
+#define MAX_CON                       8      // must be power of 2 XXX 
 #define MAX_DATA_DGRAM                100    // max is 1023
 #define MAX_DATA                      (1472-offsetof(dgram_t,u.p2p_data.data)) 
 #define MAX_RECVBUFF                  1000000
@@ -149,13 +149,12 @@ typedef struct con_s {
 // variables
 //
 
-pthread_mutex_t connect_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-con_t         * con_tbl[MAX_CON];
-int             con_handle[MAX_CON];
-pthread_mutex_t disconnect_mutex[MAX_CON];
-pthread_mutex_t send_mutex[MAX_CON];
-pthread_mutex_t mutex[MAX_CON];
+static pthread_mutex_t connect_mutex = PTHREAD_MUTEX_INITIALIZER;
+static con_t         * con_tbl[MAX_CON];
+static int             con_handle[MAX_CON];
+static pthread_mutex_t disconnect_mutex[MAX_CON];
+static pthread_mutex_t send_mutex[MAX_CON];
+static pthread_mutex_t mutex[MAX_CON];
 
 //
 // prototypes

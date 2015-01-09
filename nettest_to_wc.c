@@ -88,7 +88,7 @@ int main(int argc, char **argv)
     // verify args
     if (help_mode || (user_name == NULL) || (password == NULL) || (argc-optind != 1)) {
         PRINTF("usage: nettest_to_wc <wc_name>\n");
-        PRINTF("  -P: use http proxy server\n");
+        PRINTF("  -P: use proxy server\n");
         PRINTF("  -u <user_name>: override WC_USER_NAME environment value\n");
         PRINTF("  -p <password>: override WC_PASSWORD environment value\n");
         PRINTF("  -h: display this help text\n");

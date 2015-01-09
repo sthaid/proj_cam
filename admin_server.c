@@ -1,3 +1,5 @@
+// XXX 01/08/15 17:47:52 ERROR service_thread: reading http connect request, len=-1, Resource temporarily unavailable
+
 #include "wc.h"
 
 // TBD - is any locking required
