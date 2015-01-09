@@ -16,9 +16,8 @@
 //
 
 typedef struct {
-    int             handle;
-    int             fdm;
-    bool            p2p_disconnected;
+    int handle;
+    int fdm;
 } thread_cx_t;
 
 //
@@ -30,34 +29,60 @@ typedef struct {
 //
 
 void * read_from_shell_and_write_to_client(void * cx);
+int recv_msg(int handle, shell_msg_hdr_t * msg_hdr, void * msg_data, uint32_t max_msg_data, bool * eof);
 
 // -----------------  SERVICE SHELL  ----------------------------------------------------
 
 void * wc_svc_shell(void * cx)
 {
-    int                   handle = (int)(long)cx;
-    int                   fdm;
-    pthread_t             thread;
-    char                * slavename;
-    thread_cx_t         * thread_cx;
-    pid_t                 pid;
-    int                   len, rc;
-    char                  buf[MAX_SHELL_DATA_LEN];
-    shell_msg_to_wc_hdr_t hdr;
-    struct winsize        ws;
+    int                  handle;
+    int                  fdm, rc;
+    pthread_t            thread;
+    bool                 thread_created;
+    char               * slavename;
+    thread_cx_t        * thread_cx;
+    pid_t                pid;
+    shell_msg_hdr_t      msg_hdr;
+    shell_msg_init_t     msg_init;
+    shell_msg_winsize_t  msg_winsize;
+    char                 msg_buf[MAX_SHELL_MSGID_DATA_DATALEN];
+    struct winsize       ws;
+    bool                 eof;
+
+    // init locals
+    handle         = (int)(long)cx;
+    fdm            = -1;
+    thread_created = false;
+    pid            = 0;
+    thread_cx      = NULL;
 
     // init ptm - set fdm and slavename
     if ((fdm = open("/dev/ptmx", O_RDWR | O_NOCTTY | O_CLOEXEC)) < 0) {
-        perror("open /dev/ptmx");
-        p2p_disconnect(handle);
-        return NULL;
+        ERROR("open /dev/ptmx, %s\n", strerror(errno));
+        goto done;
     }
     grantpt(fdm);
     unlockpt(fdm);
     slavename = ptsname(fdm);
 
+    // recv the init msg
+    rc = recv_msg(handle, &msg_hdr, &msg_init, sizeof(msg_init), &eof);
+    if (rc < 0 || msg_hdr.msgid != SHELL_MSGID_INIT || msg_hdr.datalen != sizeof(shell_msg_init_t)) {
+        ERROR("recv of msg_init, rc=%d msgid=0x%x datalen=%d\n", rc, msg_hdr.msgid, msg_hdr.datalen);
+        goto done;
+    }
+
+    // set the initial window size
+    bzero(&ws, sizeof(ws));
+    ws.ws_row = msg_init.rows;
+    ws.ws_col = msg_init.cols;
+    ioctl(fdm, TIOCSWINSZ, &ws);
+
     // fork and execute child 
     if ((pid = fork()) == 0) {
+        char * envp[3];
+        char   env_term[200];
+
         // close parents stdin, stdout, stderr
         close(0);
         close(1);
@@ -72,55 +97,62 @@ void * wc_svc_shell(void * cx)
         open(slavename, O_RDWR);
 
         // exec /bin/bash
-#if 1
-        char * envp[] = { "TERM=xterm", "HOME=/home/pi", (char*)NULL };
+        sprintf(env_term, "TERM=%s", msg_init.term);
+        envp[0] = env_term;
+        envp[1] = "HOME=/home/pi";
+        envp[2] = NULL;
         execle("/bin/bash", "-", (char*)NULL, envp);
-#else
-        execl("/bin/login", "TERM=xterm", (char*)NULL);
-#endif
+
+        // not reached
         exit(1);
     }
 
     // parent executes here ...
 
-    // create thread to read from client and sent to shell
+    // create thread to read from shell and send to client
     thread_cx = malloc(sizeof(thread_cx_t));
-    thread_cx->handle           = handle;
-    thread_cx->fdm              = fdm;
-    thread_cx->p2p_disconnected = false;
-    pthread_create(&thread, NULL, read_from_shell_and_write_to_client, thread_cx);
+    thread_cx->handle = handle;
+    thread_cx->fdm    = fdm;
+    rc = pthread_create(&thread, NULL, read_from_shell_and_write_to_client, thread_cx);
+    if (rc != 0) {
+        goto done;
+    }
+    thread_created = true;
 
-    // read from client and, based on received block_id either:
-    // - send data to shell, OR
-    // - set new window size
+    // get msg from client and process the received msg
     while (true) {
-        if ((rc = p2p_recv(handle, &hdr, sizeof(hdr), RECV_WAIT_ALL)) != sizeof(hdr)) {
+        rc = recv_msg(handle, &msg_hdr, msg_buf, sizeof(msg_buf), &eof);
+        if (rc < 0) {
+            goto done;
+        }
+        if (eof) {
             goto done;
         }
 
-        switch (hdr.block_id) {
-        case BLOCK_ID_DATA:
-            len = hdr.u.block_id_data.len;
-            if (len > MAX_SHELL_DATA_LEN) {
+        switch (msg_hdr.msgid) {
+        case SHELL_MSGID_DATA:
+            if (msg_hdr.datalen == 0) {
                 goto done;
             }
-            if ((rc=p2p_recv(handle, buf, len, RECV_WAIT_ALL)) != len) {
-                goto done;  
-            }
-            if (write(thread_cx->fdm, buf, len) != len) {
+
+            if (write(fdm, msg_buf, msg_hdr.datalen) != msg_hdr.datalen) {
                 goto done;  
             }
             break;
 
-        case BLOCK_ID_WINSIZE:
+        case SHELL_MSGID_WINSIZE:
+            if (msg_hdr.datalen != sizeof(shell_msg_winsize_t)) {
+                goto done;
+            }
+
+            memcpy(&msg_winsize, msg_buf, sizeof(msg_winsize));
             bzero(&ws, sizeof(ws));
-            ws.ws_row = hdr.u.block_id_winsize.rows;
-            ws.ws_col = hdr.u.block_id_winsize.cols;
-            rc = ioctl(thread_cx->fdm, TIOCSWINSZ, &ws);
+            ws.ws_row = msg_winsize.rows;
+            ws.ws_col = msg_winsize.cols;
+            ioctl(fdm, TIOCSWINSZ, &ws);
             break;
 
         default:
-            ERROR("hdr.block_id 0x%x invalid\n", hdr.block_id);
             goto done;
         }
     }
@@ -131,13 +163,21 @@ done:
     // wait for thread to exit  ,
     // wait for shell to exit,
     // free thread_cx
-    close(fdm);
     p2p_disconnect(handle);
-    pthread_join(thread,NULL);
-    waitpid(pid, NULL, 0);
-    free(thread_cx);
+    if (fdm != -1) {
+        close(fdm);
+    }
+    if (thread_created) {
+        pthread_join(thread,NULL);
+    }
+    if (pid != 0) {
+        waitpid(pid, NULL, 0);
+    }
+    if (thread_cx != NULL) {
+        free(thread_cx);
+    }
 
-    // done
+    // terminate
     INFO("shell exit\n");
     return NULL;
 }
@@ -146,7 +186,7 @@ void * read_from_shell_and_write_to_client(void * cx)
 {
     thread_cx_t * thread_cx = cx;
     int           len;
-    char          buf[MAX_SHELL_DATA_LEN];
+    char          buf[10000];
 
     // read from shell and write to client
     while (true) {
@@ -163,4 +203,37 @@ void * read_from_shell_and_write_to_client(void * cx)
 
     // exit thread
     return NULL;
+}
+
+int recv_msg(int handle, shell_msg_hdr_t * msg_hdr, void * msg_data, uint32_t max_msg_data, bool * eof)
+{
+    int rc;
+
+    // preset returns
+    bzero(msg_hdr, sizeof(shell_msg_hdr_t));
+    *eof = false;
+
+    // get the msg_hdr
+    rc = p2p_recv(handle, msg_hdr, sizeof(shell_msg_hdr_t), RECV_WAIT_ALL);
+    if (rc == 0) {
+        *eof = true;
+        return 0;
+    }
+    if (rc != sizeof(shell_msg_hdr_t)) {
+        return -1;
+    }
+
+    // validata the datalen
+    if (msg_hdr->datalen > max_msg_data) {
+        return -1;
+    }
+
+    // get the msg_data
+    rc = p2p_recv(handle, msg_data, msg_hdr->datalen, RECV_WAIT_ALL);
+    if (rc != msg_hdr->datalen) {
+        return -1;
+    }
+
+    // return success
+    return 0;
 }

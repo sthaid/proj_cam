@@ -495,23 +495,29 @@ typedef struct {
 
 // -----------------  SERVICE_SHELL DEFINITIONS  -------------------------------------
 
-#define MAX_SHELL_DATA_LEN 10000
+// define shell msgs sent from loginwc.c client sent to wc_login.c server
 
-#define BLOCK_ID_DATA         0x55667701
-#define BLOCK_ID_WINSIZE      0x55667702
+#define SHELL_MSGID_INIT     0x55667701
+#define SHELL_MSGID_WINSIZE  0x55667702
+#define SHELL_MSGID_DATA     0x55667703
+
+#define MAX_SHELL_MSGID_DATA_DATALEN 10000
 
 typedef struct {
-    uint32_t block_id;
-    union {
-        struct {
-            uint32_t len;
-        } block_id_data;
-        struct {
-            uint16_t rows;
-            uint16_t cols;
-        } block_id_winsize;
-    } u;
-} shell_msg_to_wc_hdr_t;
+    uint32_t msgid;
+    uint32_t datalen;
+} shell_msg_hdr_t;
+
+typedef struct {
+    uint32_t rows;
+    uint32_t cols;
+    char     term[200];
+} shell_msg_init_t;
+
+typedef struct {
+    uint32_t rows;
+    uint32_t cols;
+} shell_msg_winsize_t;
 
 // -----------------  TIMING CODE PATH EXECUTION  ------------------------------------
 

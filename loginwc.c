@@ -1,7 +1,5 @@
 #include "wc.h"
 
-// XXX p2p2 update for disconnect
-
 //
 // defines 
 //
@@ -20,7 +18,8 @@ sigset_t         sig_set;
 
 void * read_from_terminal_and_write_to_shell(void * cx);
 void * sigwinch_thread(void * cx);
-void send_window_size_msg(void);
+int send_init_msg(void);
+int send_window_size_msg(void);
 
 // -----------------  MAIN  ----------------------------------------------
 
@@ -32,7 +31,7 @@ int main(int argc, char **argv)
     char         * wc_name;
     pthread_t      thread;
     int            len, rc, connect_status;
-    char           buf[MAX_SHELL_DATA_LEN], opt_char;
+    char           buf[10000], opt_char;
     struct termios termios;
     struct termios termios_initial;
     bool           debug_mode = false;
@@ -88,7 +87,7 @@ int main(int argc, char **argv)
     // verify args
     if (help_mode || (user_name == NULL) || (password == NULL) || (argc-optind != 1)) {
         PRINTF("usage: loginwc <wc_name>\n");
-        PRINTF("  -P: use http proxy server\n");
+        PRINTF("  -P: use proxy server\n");
         PRINTF("  -u <user_name>: override WC_USER_NAME environment value\n");
         PRINTF("  -p <password>: override WC_PASSWORD environment value\n");
         PRINTF("  -h: display this help text\n");
@@ -111,6 +110,9 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    // send init message to the shell server
+    send_init_msg();
+
     // set terminal to raw mode
     tcgetattr(0, &termios_initial);
     termios = termios_initial;
@@ -120,9 +122,6 @@ int main(int argc, char **argv)
     // create threads
     pthread_create(&thread, NULL, sigwinch_thread, NULL);
     pthread_create(&thread, NULL, read_from_terminal_and_write_to_shell, NULL);
-
-    // send window size to server
-    send_window_size_msg();
 
     // read from shell and write to terminal
     while (true) {
@@ -135,10 +134,9 @@ int main(int argc, char **argv)
         }
     }
 
-    // restore terminal
-    tcsetattr(0, TCSANOW, &termios_initial);
-
+    // restore terminal, and
     // p2p disconnect
+    tcsetattr(0, TCSANOW, &termios_initial);
     p2p_disconnect(handle);
 
     // return success
@@ -149,22 +147,22 @@ int main(int argc, char **argv)
 void * read_from_terminal_and_write_to_shell(void * cx)
 {
     int  len;
-    char buf[MAX_SHELL_DATA_LEN + sizeof(shell_msg_to_wc_hdr_t)];
-    shell_msg_to_wc_hdr_t hdr;
+    char buf[MAX_SHELL_MSGID_DATA_DATALEN + sizeof(shell_msg_hdr_t)];
+    shell_msg_hdr_t hdr;
 
     // detach because this thread will not be joined
     pthread_detach(pthread_self());
 
     // read from terminal and write to shell
     while (true) {
-        // read from terminal, len is number of bytes read
+        // read from terminal
         if ((len = read(0, buf+sizeof(hdr), sizeof(buf)-sizeof(hdr))) <= 0) {
             break;
         }
 
-        // write to shell 
-        hdr.block_id = BLOCK_ID_DATA;
-        hdr.u.block_id_data.len = len;
+        // send data msg to shell
+        hdr.msgid    = SHELL_MSGID_DATA;
+        hdr.datalen  = len;
         memcpy(buf, &hdr, sizeof(hdr));
         if (p2p_send(handle, buf, sizeof(hdr)+len) != sizeof(hdr)+len) {
             break;
@@ -180,29 +178,77 @@ void * read_from_terminal_and_write_to_shell(void * cx)
 
 void * sigwinch_thread(void * cx)
 {
+    int signum;
+
     while (true) {
         // wait for SIGWINCH signal
-        int signum = 0;
+        signum = 0;
         sigwait(&sig_set, &signum);
 
-        // call send_window_size which will read the new window size, and
-        // send window size to server
+        // send the new window size to shell
         send_window_size_msg();
     }
 
     return NULL;
 }
 
-void send_window_size_msg(void)
+int send_init_msg(void)
 {
+    int            ret;
     struct winsize ws;
-    shell_msg_to_wc_hdr_t hdr;
+    char         * term;
+    struct {
+        shell_msg_hdr_t hdr;
+        shell_msg_init_t init;
+    } msg;
 
     bzero(&ws, sizeof(ws));
-    ioctl(0, TIOCGWINSZ, &ws);
+    ret = ioctl(0, TIOCGWINSZ, &ws);
+    if (ret < 0) {
+        return ret;
+    }
 
-    hdr.block_id = BLOCK_ID_WINSIZE;
-    hdr.u.block_id_winsize.rows = ws.ws_row;
-    hdr.u.block_id_winsize.cols = ws.ws_col;
-    p2p_send(handle, &hdr, sizeof(hdr));
+    term = getenv("TERM");
+
+    bzero(&msg, sizeof(msg));
+    msg.hdr.msgid   = SHELL_MSGID_INIT;
+    msg.hdr.datalen = sizeof(shell_msg_init_t);
+    msg.init.rows   = ws.ws_row;
+    msg.init.cols   = ws.ws_col;
+    strcpy(msg.init.term, term ? term : "");
+    ret = p2p_send(handle, &msg, sizeof(msg));
+    if (ret < 0) {
+        return ret;
+    }
+
+    return 0;
 }
+
+int send_window_size_msg(void)
+{
+    int            ret;
+    struct winsize ws;
+    struct {
+        shell_msg_hdr_t hdr;
+        shell_msg_winsize_t ws;
+    } msg;
+
+    bzero(&ws, sizeof(ws));
+    ret = ioctl(0, TIOCGWINSZ, &ws);
+    if (ret < 0) {
+        return ret;
+    }
+
+    bzero(&msg, sizeof(msg));
+    msg.hdr.msgid   = SHELL_MSGID_WINSIZE;
+    msg.hdr.datalen = sizeof(shell_msg_winsize_t);
+    msg.ws.rows     = ws.ws_row;
+    msg.ws.cols     = ws.ws_col;
+    ret = p2p_send(handle, &msg, sizeof(msg));
+    if (ret < 0) {
+        return ret;
+    }
+
+    return 0;
+}
+
