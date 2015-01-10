@@ -104,6 +104,10 @@ int main(int argc, char **argv)
     pthread_sigmask(SIG_BLOCK, &sig_set, NULL);
 
     // connect to the webcam
+    if (p2p_init(1) < 0) {
+        PRINTF("p2p_init failed\n");
+        return 1;
+    }
     handle = p2p_connect(user_name, password, wc_name, SERVICE_SHELL, &connect_status);
     if (handle < 0) {
         PRINTF("connect to %s failed, %s\n", wc_name, status2str(connect_status));

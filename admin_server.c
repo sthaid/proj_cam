@@ -137,6 +137,13 @@ int main(int argc, char ** argv)
     logmsg_init(debug_mode == 0 ? "admin_server.log" : "stderr");
     INFO("STARTING %s\n", argv[0]);
 
+    // initialize p2p connection module,
+    // this is used for the webcam connect proxy,
+    // allow max of 100 connections
+    if (p2p_init(2) < 0) { //XXX 100
+        FATAL("p2p_init failed\n");
+    }
+
     // call subsystem initialization routines
     account_init();
     dgram_init();

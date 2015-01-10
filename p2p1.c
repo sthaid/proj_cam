@@ -11,7 +11,6 @@
 // defines
 //
 
-#define MAX_CON                       8      // must be power of 2 XXX 
 #define MAX_DATA_DGRAM                100    // max is 1023
 #define MAX_DATA                      (1472-offsetof(dgram_t,u.p2p_data.data)) 
 #define MAX_RECVBUFF                  1000000
@@ -149,17 +148,19 @@ typedef struct con_s {
 // variables
 //
 
-static pthread_mutex_t connect_mutex = PTHREAD_MUTEX_INITIALIZER;
-static con_t         * con_tbl[MAX_CON];
-static int             con_handle[MAX_CON];
-static pthread_mutex_t disconnect_mutex[MAX_CON];
-static pthread_mutex_t send_mutex[MAX_CON];
-static pthread_mutex_t mutex[MAX_CON];
+static pthread_mutex_t   connect_mutex = PTHREAD_MUTEX_INITIALIZER;
+static int               max_con;
+static con_t          ** con_tbl;
+static int             * con_handle;
+static pthread_mutex_t * disconnect_mutex;
+static pthread_mutex_t * send_mutex;
+static pthread_mutex_t * mutex;
 
 //
 // prototypes
 //
 
+int p2p1_init(int max_con_arg);
 int p2p1_connect(char * user_name, char * password, char * wc_name, int service, int * connect_status);
 int p2p1_accept(char * wc_macaddr, int * service, char * user_name);
 int connect_common(int sfd, struct sockaddr_in * peer_addr, uint64_t con_id, int * status);
@@ -190,7 +191,8 @@ void debug_print_dgram(bool recv, dgram_t * dg, int len);
 // p2p routines
 //
 
-p2p_routines_t p2p1 = { p2p1_connect,
+p2p_routines_t p2p1 = { p2p1_init,
+                        p2p1_connect,
                         p2p1_accept,
                         p2p1_disconnect,
                         p2p1_send,
@@ -198,6 +200,49 @@ p2p_routines_t p2p1 = { p2p1_connect,
                         p2p1_get_stats,
                         p2p1_monitor_ctl,
                         p2p1_debug_con };
+
+// -----------------  P2P_INIT  ----------------------------------------
+
+// XXX unsigned
+int p2p1_init(int max_con_arg)
+{
+    int i;
+
+    // verify max_con is power of 2
+#if 0 //XXX
+    if (max_con != 1 && max_con != 2 && max_con != 4 && max_con != 8 && max_con != 16 && 
+        max_con != 32 && max_con != 64 && max_con != 128 && max_con != 256 && max_con != 512 && 
+        max_con != 1024)
+#endif
+    if (__builtin_popcount(max_con_arg) != 1 || max_con_arg > 1024 || max_con_arg < 0) {
+        ERROR("invalid max_con %d\n", max_con_arg);
+        return -1;
+    }
+
+    // allocate tables
+    max_con          = max_con_arg;
+    con_tbl          = calloc(max_con, sizeof(con_tbl[0]));
+    con_handle       = calloc(max_con, sizeof(con_handle[0]));
+    disconnect_mutex = calloc(max_con, sizeof(disconnect_mutex[0]));
+    send_mutex       = calloc(max_con, sizeof(send_mutex[0]));
+    mutex            = calloc(max_con, sizeof(mutex[0]));
+
+    // check for allocation failure
+    if (!con_tbl || !con_handle || !disconnect_mutex || !send_mutex || !mutex) {
+        ERROR("allocation failure\n");
+        return -1;
+    }
+
+    // init mutexes
+    for (i = 0; i < max_con; i++) {
+        pthread_mutex_init(&disconnect_mutex[i], NULL);
+        pthread_mutex_init(&send_mutex[i], NULL);
+        pthread_mutex_init(&mutex[i], NULL);
+    }
+
+    // return success
+    return 0;
+}
 
 // -----------------  P2P_CONNECT & P2P_ACCEPT  ------------------------
 
@@ -609,7 +654,6 @@ int connect_common(int sfd, struct sockaddr_in * peer_addr, uint64_t con_id, int
     bool                          mutex_acquired = false;
 
     static int                    handle_upper_val;
-    static bool                   first_call = true;
 
     // initial prints
     INFO("%"PRId64" connecting to peer %s\n",
@@ -627,18 +671,8 @@ int connect_common(int sfd, struct sockaddr_in * peer_addr, uint64_t con_id, int
     pthread_mutex_lock(&connect_mutex);
     connect_mutex_acquired = true;
 
-    // on first call, init the other mutexes
-    if (first_call) {
-        for (i = 0; i < MAX_CON; i++) {
-            pthread_mutex_init(&disconnect_mutex[i], NULL);
-            pthread_mutex_init(&send_mutex[i], NULL);
-            pthread_mutex_init(&mutex[i], NULL);
-        }
-        first_call = false;
-    }
-
     // verify con_id is not already inuse 
-    for (i = 0; i < MAX_CON; i++) {
+    for (i = 0; i < max_con; i++) {
         if (con_tbl[i] && con_tbl[i]->con_id == con_id) {
             ERROR("%"PRId64" con_id is already in use\n", con_id);
             *status = STATUS_ERR_DUPLICATE_CONNECTION_ID;
@@ -647,14 +681,16 @@ int connect_common(int sfd, struct sockaddr_in * peer_addr, uint64_t con_id, int
     }
 
     // find a free entry in the con tbl
-    for (con_tbl_idx = 0; con_tbl_idx < MAX_CON; con_tbl_idx++) {
+    for (con_tbl_idx = 0; con_tbl_idx < max_con; con_tbl_idx++) {
         if (con_tbl[con_tbl_idx] == NULL) {
             break;
         }
     }
-    if (con_tbl_idx == MAX_CON) {
+    if (con_tbl_idx == max_con) {
         ERROR("%"PRId64" con_tbl has no free slot for new connection\n", con_id);
         *status = STATUS_ERR_TOO_MANY_CONNECTIONS;
+//XXX send p2p_con_req with recection status,
+//    maybe this could be done at error_ret
         goto error_ret;
     }
 
@@ -663,14 +699,15 @@ int connect_common(int sfd, struct sockaddr_in * peer_addr, uint64_t con_id, int
     if (con == NULL) {
         ERROR("%"PRId64" con mem alloc failed\n", con_id);
         *status = STATUS_ERR_CONNECTION_MEM_ALLOC;
+// XXX
         goto error_ret;
     }
 
     // construct the handle;  the lower bits are con_tbl_idx and the upper buts
     // are a unique value used for verification that an old handle value is not being used
-    handle = (con_tbl_idx + __sync_add_and_fetch(&handle_upper_val,MAX_CON)) & 0x7fffffff;
+    handle = (con_tbl_idx + __sync_add_and_fetch(&handle_upper_val,max_con)) & 0x7fffffff;
     if (handle == 0) {
-        handle = (con_tbl_idx + __sync_add_and_fetch(&handle_upper_val,MAX_CON)) & 0x7fffffff;
+        handle = (con_tbl_idx + __sync_add_and_fetch(&handle_upper_val,max_con)) & 0x7fffffff;
     }
 
     // set con_handle
@@ -782,7 +819,7 @@ int p2p1_disconnect(int handle)
     int                  ret = 0;
 
     // verify handle, acquire mutex, and set ptr to con
-    con_tbl_idx = (handle & (MAX_CON-1));
+    con_tbl_idx = (handle & (max_con-1));
     pthread_mutex_lock(&disconnect_mutex[con_tbl_idx]);
     pthread_mutex_lock(&mutex[con_tbl_idx]);
     if (con_tbl[con_tbl_idx] == NULL || con_handle[con_tbl_idx] != handle) {
@@ -936,7 +973,7 @@ int p2p1_send(int handle, void * buff, int len)
     }
 
     // verify handle, acquire mutex, and set ptr to con
-    con_tbl_idx = (handle & (MAX_CON-1));
+    con_tbl_idx = (handle & (max_con-1));
     pthread_mutex_lock(&send_mutex[con_tbl_idx]);
     pthread_mutex_lock(&mutex[con_tbl_idx]);
     if (con_tbl[con_tbl_idx] == NULL || con_handle[con_tbl_idx] != handle) {
@@ -1083,7 +1120,7 @@ int p2p1_recv(int handle, void * buff, int len, int mode)
     }
 
     // verify handle, acquire mutex, and set ptr to con
-    con_tbl_idx = (handle & (MAX_CON-1));
+    con_tbl_idx = (handle & (max_con-1));
     pthread_mutex_lock(&mutex[con_tbl_idx]);
     if (con_tbl[con_tbl_idx] == NULL || con_handle[con_tbl_idx] != handle) {
         if (con_tbl[con_tbl_idx] == NULL) {
@@ -1685,7 +1722,7 @@ int p2p1_get_stats(int handle, p2p_stats_t * stats)
     int     con_tbl_idx;
 
     // verify handle, acquire mutex, and set ptr to con
-    con_tbl_idx = (handle & (MAX_CON-1));
+    con_tbl_idx = (handle & (max_con-1));
     pthread_mutex_lock(&mutex[con_tbl_idx]);
     if (con_tbl[con_tbl_idx] == NULL || con_handle[con_tbl_idx] != handle) {
         if (con_tbl[con_tbl_idx] == NULL) {
@@ -1715,7 +1752,7 @@ int p2p1_monitor_ctl(int handle, int secs)
     int     con_tbl_idx;
 
     // verify handle, acquire mutex, and set ptr to con
-    con_tbl_idx = (handle & (MAX_CON-1));
+    con_tbl_idx = (handle & (max_con-1));
     pthread_mutex_lock(&mutex[con_tbl_idx]);
     if (con_tbl[con_tbl_idx] == NULL || con_handle[con_tbl_idx] != handle) {
         if (con_tbl[con_tbl_idx] == NULL) {
@@ -2142,7 +2179,7 @@ void p2p1_debug_con(int handle)
         PRINTF("    HANDLE   CON_ID        STATE            PEER_ADDR\n");
 
         pthread_mutex_lock(&connect_mutex);
-        for (i = 0; i < MAX_CON; i++) {
+        for (i = 0; i < max_con; i++) {
             con_t * con = con_tbl[i];
             if (con == NULL) {
                 continue;
@@ -2166,7 +2203,7 @@ void p2p1_debug_con(int handle)
     char                                 peer_addr_str[100];
 
     // verify handle, acquire mutex, and set ptr to con
-    con_tbl_idx = (handle & (MAX_CON-1));
+    con_tbl_idx = (handle & (max_con-1));
     pthread_mutex_lock(&mutex[con_tbl_idx]);
     if (con_tbl[con_tbl_idx] == NULL || con_handle[con_tbl_idx] != handle) {
         ERROR("invalid handle %d\n", handle);

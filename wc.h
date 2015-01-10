@@ -131,6 +131,7 @@ typedef struct {
     uint64_t peer_recvd_duplicates;
 } p2p_stats_t;
 
+#define p2p_init        (*p2p->init)
 #define p2p_connect     (*p2p->connect)
 #define p2p_accept      (*p2p->accept)
 #define p2p_disconnect  (*p2p->disconnect)
@@ -141,6 +142,7 @@ typedef struct {
 #define p2p_debug_con   (*p2p->debug_con)
 
 typedef struct {
+    int (*init)(int max_con);
     int (*connect)(char * user_name, char * password, char * wc_name, int service, int * connect_status);
     int (*accept)(char * wc_macaddr, int * service, char * user_name);
     int (*disconnect)(int handle);
@@ -340,7 +342,7 @@ typedef struct {
 #define STATUS_ERR_NO_RESPONSE_FROM_SERVER   129
 #define STATUS_ERR_INVALID_CONNECTION_ID     130
 #define STATUS_ERR_DUPLICATE_CONNECTION_ID   131
-#define STATUS_ERR_TOO_MANY_CONNECTIONS      132
+#define STATUS_ERR_TOO_MANY_CONNECTIONS      132   // XXX distinguish proxy server vs webcam accept vs locl
 #define STATUS_ERR_CONNECTION_MEM_ALLOC      133
 #define STATUS_ERR_NO_RESPONSE_FROM_PEER     134
 #define STATUS_ERR_FAILED_CONNECT_TO_SERVER  135

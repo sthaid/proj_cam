@@ -348,9 +348,10 @@ void * debug_thread(void * cx);
 
 int main(int argc, char **argv)
 {
-    struct rlimit  rl;
-    int            ret, i, count;
-    const char   * config_dir;
+    struct rlimit    rl;
+    int              ret, i, count;
+    const char     * config_dir;
+    p2p_routines_t * p2p;
 
     // set resource limti to allow core dumps
     rl.rlim_cur = RLIM_INFINITY;
@@ -397,6 +398,17 @@ int main(int argc, char **argv)
     // init logging
     logmsg_init(CONFIG_DEBUG == 'Y' ? "stderr" : "none");
     INFO("STARTING %s\n", argv[0]);
+
+    // initialize p2p connection modules
+    // XXX re-initialized on android ?
+    p2p = &p2p1;
+    if (p2p_init(4) < 0) {
+        FATAL("p2p1_init failed\n");
+    }
+    p2p = &p2p2;
+    if (p2p_init(4) < 0) {
+        FATAL("p2p2_init failed\n");
+    }
 
     // it is important that the viewer and the webcam computers have their 
     // clocks in sync; the webcam computers use ntp; unfortunately my Android tablet 

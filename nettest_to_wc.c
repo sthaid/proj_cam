@@ -115,6 +115,10 @@ void nettest_to_webcam(char * user_name, char * password, char * wc_name)
     pthread_t send_thread_id, recv_thread_id;
 
     // connect to the webcam
+    if (p2p_init(1) < 0) {
+        PRINTF("p2p_init failed\n");
+        exit(1);  
+    }
     handle = p2p_connect(user_name, password, wc_name, SERVICE_NETTEST, &connect_status);
     if (handle < 0) {
         PRINTF("connect to %s failed, %s\n", wc_name, status2str(connect_status));

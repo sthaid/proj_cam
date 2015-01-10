@@ -6,7 +6,6 @@
 // defines
 //
 
-#define MAX_CON             8       // must be power of 2
 #define MAX_RECV_SAVE_BUFF  0x1000
 
 #define MILLISEC_TIMER      (microsec_timer() / 1000)
@@ -41,13 +40,15 @@ typedef struct {
 // variables
 //
 
-static con_t           con_tbl[MAX_CON];
+static int             max_con;
+static con_t         * con_tbl;
 static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
 
 //
 // prototypes
 //
 
+static int p2p2_init(int max_con_arg);
 static int p2p2_connect(char * user_name, char * password, char * wc_name, int service, int * connect_status);
 static int p2p2_accept(char * wc_macaddr, int * service, char * user_name);
 static int p2p2_disconnect(int handle);
@@ -63,7 +64,8 @@ static void sleep_ms(int ms);
 // p2p routines
 //
 
-p2p_routines_t p2p2 = { p2p2_connect,
+p2p_routines_t p2p2 = { p2p2_init,
+                        p2p2_connect,
                         p2p2_accept,
                         p2p2_disconnect,
                         p2p2_send,
@@ -73,6 +75,31 @@ p2p_routines_t p2p2 = { p2p2_connect,
                         p2p2_debug_con };
 
 // -------------------------------------------------------------------------------
+
+static int p2p2_init(int max_con_arg)
+{
+    // verify max_con is power of 2
+#if 0
+    if (max_con != 1 && max_con != 2 && max_con != 4 && max_con != 8 && max_con != 16 && 
+        max_con != 32 && max_con != 64 && max_con != 128 && max_con != 256 && max_con != 512 && 
+        max_con != 1024)
+#endif
+    if (__builtin_popcount(max_con_arg) != 1 || max_con_arg > 1024 || max_con_arg < 0) {
+        ERROR("invalid max_con %d\n", max_con_arg);
+        return -1;
+    }
+
+    // allocate con_tbl
+    INFO("XXX SIZE OF ENT %d\n", (int)sizeof(con_tbl[0]));
+    max_con = max_con_arg;
+    con_tbl = calloc(max_con, sizeof(con_tbl[0]));
+    if (con_tbl == NULL) {
+        return -1;
+    }
+
+    // return success
+    return 0;
+}
 
 static int p2p2_connect(char * user_name, char * password, char * wc_name, int service_id, int * connect_status)
 {
@@ -101,22 +128,23 @@ try_again:
 
     // allocate and init con; only non-zero fields are set
     pthread_mutex_lock(&mutex);
-    for (con_tbl_idx = 0; con_tbl_idx < MAX_CON; con_tbl_idx++) {
+    for (con_tbl_idx = 0; con_tbl_idx < max_con; con_tbl_idx++) {
         if (con_tbl[con_tbl_idx].in_use == false) {
             break;
         }
     }
-    if (con_tbl_idx == MAX_CON) {
+    if (con_tbl_idx == max_con) {
         ERROR("no free con_tbl entry\n");
         *connect_status = STATUS_ERR_TOO_MANY_CONNECTIONS;
         pthread_mutex_unlock(&mutex);
         return -1;
     }
 
-    handle = (con_tbl_idx + __sync_add_and_fetch(&handle_upper_val,MAX_CON)) & 0x7fffffff;
+    handle = (con_tbl_idx + __sync_add_and_fetch(&handle_upper_val,max_con)) & 0x7fffffff;
     if (handle == 0) {
-        handle = (con_tbl_idx + __sync_add_and_fetch(&handle_upper_val,MAX_CON)) & 0x7fffffff;
+        handle = (con_tbl_idx + __sync_add_and_fetch(&handle_upper_val,max_con)) & 0x7fffffff;
     }
+    INFO("XXX HANDLE %d\n", handle);
 
     con = &con_tbl[con_tbl_idx];
     bzero(con, sizeof(con_t));
@@ -148,7 +176,7 @@ static int p2p2_disconnect(int handle)
 
     // verify, set ptr to con, and set disconnecting flag
     pthread_mutex_lock(&mutex);
-    con = &con_tbl[handle & (MAX_CON-1)];
+    con = &con_tbl[handle & (max_con-1)];
     if (handle != con->handle || !con->in_use || con->disconnecting) {
         ERROR("invalid handle=0x%x con handle=0x%x in_use=%d disconnecting=%d\n",
               handle, con->handle, con->in_use, con->disconnecting);
@@ -191,7 +219,7 @@ static int p2p2_send(int handle, void * buff, int len)
 
     // verify, set ptr to con, and increment ref_cnt
     pthread_mutex_lock(&mutex);
-    con = &con_tbl[handle & (MAX_CON-1)];
+    con = &con_tbl[handle & (max_con-1)];
     if (handle != con->handle || !con->in_use || con->disconnecting || con->failed) {
         ERROR("invalid handle=0x%x con handle=0x%x in_use=%d disconnecting=%d failed=%d\n",
               handle, con->handle, con->in_use, con->disconnecting, con->failed);
@@ -270,7 +298,7 @@ static int p2p2_recv(int handle, void * caller_buff, int caller_buff_len, int mo
 
     // verify, set ptr to con, and increment ref_cnt
     pthread_mutex_lock(&mutex);
-    con = &con_tbl[handle & (MAX_CON-1)];
+    con = &con_tbl[handle & (max_con-1)];
     if (handle != con->handle || !con->in_use || con->disconnecting || con->failed) {
         ERROR("invalid handle=0x%x con handle=0x%x in_use=%d disconnecting=%d failed=%d\n",
               handle, con->handle, con->in_use, con->disconnecting, con->failed);
@@ -454,7 +482,7 @@ static int p2p2_get_stats(int handle, p2p_stats_t * stats)
 
     // verify, set ptr to con, and increment ref_cnt
     pthread_mutex_lock(&mutex);
-    con = &con_tbl[handle & (MAX_CON-1)];
+    con = &con_tbl[handle & (max_con-1)];
     if (handle != con->handle || !con->in_use || con->disconnecting || con->failed) {
         ERROR("invalid handle=0x%x con handle=0x%x in_use=%d disconnecting=%d failed=%d\n",
               handle, con->handle, con->in_use, con->disconnecting, con->failed);
@@ -485,7 +513,7 @@ static int p2p2_monitor_ctl(int handle, int secs)
 
     // verify, set ptr to con, and increment ref_cnt
     pthread_mutex_lock(&mutex);
-    con = &con_tbl[handle & (MAX_CON-1)];
+    con = &con_tbl[handle & (max_con-1)];
     if (handle != con->handle || !con->in_use || con->disconnecting || con->failed) {
         ERROR("invalid handle=0x%x con handle=0x%x in_use=%d disconnecting=%d failed=%d\n",
               handle, con->handle, con->in_use, con->disconnecting, con->failed);

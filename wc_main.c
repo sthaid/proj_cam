@@ -85,6 +85,11 @@ int main(int argc, char **argv)
         }
     }
 
+    // initialize p2p connection module
+    if (p2p_init(2) < 0) {  //XXX bigg needed
+        FATAL("p2p_init failed\n");
+    }
+
     // initialize message logging
     logmsg_init(debug_mode == 0 ? "wc_server.log" : "stderr");
     INFO("STARTING %s\n", argv[0]);
