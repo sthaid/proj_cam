@@ -140,7 +140,7 @@ int main(int argc, char ** argv)
     // initialize p2p connection module,
     // this is used for the webcam connect proxy,
     // allow max of 100 connections
-    if (p2p_init(2) < 0) { //XXX 100
+    if (p2p_init(128) < 0) {
         FATAL("p2p_init failed\n");
     }
 

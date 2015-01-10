@@ -225,6 +225,7 @@ typedef struct {
         } p2p_con_req;
         struct {
             uint64_t con_id;
+            int status;
             char dgram_end;
         } p2p_con_resp;
         struct {
@@ -342,81 +343,81 @@ typedef struct {
 #define STATUS_ERR_NO_RESPONSE_FROM_SERVER   129
 #define STATUS_ERR_INVALID_CONNECTION_ID     130
 #define STATUS_ERR_DUPLICATE_CONNECTION_ID   131
-#define STATUS_ERR_TOO_MANY_CONNECTIONS      132   // XXX distinguish proxy server vs webcam accept vs locl
-#define STATUS_ERR_CONNECTION_MEM_ALLOC      133
-#define STATUS_ERR_NO_RESPONSE_FROM_PEER     134
-#define STATUS_ERR_FAILED_CONNECT_TO_SERVER  135
-#define STATUS_ERR_INVLD_RESP_FROM_SERVER    136
-#define STATUS_ERR_USERNAME_LENGTH           137
-#define STATUS_ERR_PASSWORD_LENGTH           138
-#define STATUS_ERR_USERNAME_CHARS            139
-#define STATUS_ERR_PASSWORD_CHARS            140
-#define STATUS_ERR_INVALID_USER_OR_PASSWD    141
-#define STATUS_ERR_INVALID_SERVICE           142
-#define STATUS_ERR_WC_DOES_NOT_EXIST         143
-#define STATUS_ERR_WC_NOT_ONLINE             144
-#define STATUS_ERR_WC_ADDR_NOT_AVAIL         145
-#define STATUS_ERR_USERNAME_ALREADY_EXISTS   146
-#define STATUS_ERR_TOO_MANY_USERS            147
-#define STATUS_ERR_CREATE_USER_PROFILE       148
+#define STATUS_ERR_TOO_MANY_CONNECTIONS      132
+#define STATUS_ERR_CONNECTION_MEM_ALLOC      134
+#define STATUS_ERR_NO_RESPONSE_FROM_PEER     135
+#define STATUS_ERR_FAILED_CONNECT_TO_SERVER  136
+#define STATUS_ERR_INVLD_RESP_FROM_SERVER    137
+#define STATUS_ERR_USERNAME_LENGTH           138
+#define STATUS_ERR_PASSWORD_LENGTH           139
+#define STATUS_ERR_USERNAME_CHARS            140
+#define STATUS_ERR_PASSWORD_CHARS            141
+#define STATUS_ERR_INVALID_USER_OR_PASSWD    142
+#define STATUS_ERR_INVALID_SERVICE           143
+#define STATUS_ERR_WC_DOES_NOT_EXIST         144
+#define STATUS_ERR_WC_NOT_ONLINE             145
+#define STATUS_ERR_WC_ADDR_NOT_AVAIL         146
+#define STATUS_ERR_USERNAME_ALREADY_EXISTS   147
+#define STATUS_ERR_TOO_MANY_USERS            148
+#define STATUS_ERR_CREATE_USER_PROFILE       149
 
 #define STATUS_STR(status) \
-    ((status) == STATUS_INFO_OK                       ? "OK"                      : \
-     (status) == STATUS_INFO_STOPPED                  ? "STOPPED"                 : \
-     (status) == STATUS_INFO_GAP                      ? "GAP"                     : \
-     (status) == STATUS_INFO_LOADING_IMAGE            ? "LOADING_IMAGE"           : \
-     (status) == STATUS_INFO_CHANGING_RESOLUTION      ? "CHANGING_RESOLUTION"     : \
-     (status) == STATUS_INFO_NOT_RUN                  ? "NOT_RUN"                 : \
-     (status) == STATUS_INFO_IN_PROGRESS              ? "IN_PROGRESS"             : \
-     (status) == STATUS_ERR_GENERAL_FAILURE           ? "GENERAL_FAILURE"         : \
-     (status) == STATUS_ERR_FRAME_FILE_OFFSET_INVLD   ? "FRAME_FILE_OFFSET_INVLD" : \
-     (status) == STATUS_ERR_FRAME_FILE_EMPTY          ? "FRAME_FILE_EMPTY"        : \
-     (status) == STATUS_ERR_FRAME_BEFORE_BOD          ? "FRAME_BEFORE_BOD"        : \
-     (status) == STATUS_ERR_FRAME_AFTER_EOD           ? "FRAME_AFTER_EOD"         : \
-     (status) == STATUS_ERR_FRAME_NOT_FOUND_1         ? "FRAME_NOT_FOUND_1"       : \
-     (status) == STATUS_ERR_FRAME_NOT_FOUND_2         ? "FRAME_NOT_FOUND_2"       : \
-     (status) == STATUS_ERR_FRAME_NOT_FOUND_3         ? "FRAME_NOT_FOUND_3"       : \
-     (status) == STATUS_ERR_FRAME_NOT_FOUND_4         ? "FRAME_NOT_FOUND_4"       : \
-     (status) == STATUS_ERR_FRAME_HDR_READ            ? "FRAME_HDR_READ"          : \
-     (status) == STATUS_ERR_FRAME_HDR_MAGIC           ? "FRAME_HDR_MAGIC"         : \
-     (status) == STATUS_ERR_FRAME_HDR_CHECKSUM        ? "FRAME_HDR_CHECKSUM"      : \
-     (status) == STATUS_ERR_FRAME_DATA_MEM_ALLOC      ? "FRAME_DATA_MEM_ALLOC"    : \
-     (status) == STATUS_ERR_FRAME_DATA_READ           ? "FRAME_DATA_READ"         : \
-     (status) == STATUS_ERR_FRAME_TIME                ? "FRAME_TIME"              : \
-     (status) == STATUS_ERR_JPEG_DECODE               ? "JPEG_DECODE"             : \
-     (status) == STATUS_ERR_DEAD                      ? "DEAD"                    : \
-     (status) == STATUS_ERR_WEBCAM_FAILURE            ? "WEBCAM_FAILURE"          : \
-     (status) == STATUS_ERR_SYSTEM_CLOCK_NOT_SET      ? "SYSTEM_CLOCK_NOT_SET"    : \
-     (status) == STATUS_ERR_NO_USERNAME               ? "NO_USERNAME"             : \
-     (status) == STATUS_ERR_NO_PASSWORD               ? "NO_PASSWORD"             : \
-     (status) == STATUS_ERR_HANDLE_TOO_BIG            ? "HANDLE_TOO_BIG"          : \
-     (status) == STATUS_ERR_GET_SERVER_ADDR           ? "GET_SERVER_ADDR"         : \
-     (status) == STATUS_ERR_CREATE_SOCKET             ? "CREATE_SOCKET"           : \
-     (status) == STATUS_ERR_GET_LOCAL_ADDR            ? "GET_LOCAL_ADDR"          : \
-     (status) == STATUS_ERR_BIND_LOCAL_ADDR           ? "BIND_LOCAL_ADDR"         : \
-     (status) == STATUS_ERR_GETSOCKNAME               ? "GETSOCKNAME"             : \
-     (status) == STATUS_ERR_SENDTO                    ? "SENDTO"                  : \
-     (status) == STATUS_ERR_RECVFROM                  ? "RECVFROM"                : \
-     (status) == STATUS_ERR_NO_RESPONSE_FROM_SERVER   ? "NO_RESPONSE_FROM_SERVER" : \
-     (status) == STATUS_ERR_INVALID_CONNECTION_ID     ? "INVALID_CONNECTION_ID"   : \
-     (status) == STATUS_ERR_DUPLICATE_CONNECTION_ID   ? "DUPLICATE_CONNECTION_ID" : \
-     (status) == STATUS_ERR_TOO_MANY_CONNECTIONS      ? "TOO_MANY_CONNECTIONS"    : \
-     (status) == STATUS_ERR_CONNECTION_MEM_ALLOC      ? "CONNECTION_MEM_ALLOC"    : \
-     (status) == STATUS_ERR_NO_RESPONSE_FROM_PEER     ? "NO_RESPONSE_FROM_PEER"   : \
-     (status) == STATUS_ERR_FAILED_CONNECT_TO_SERVER  ? "FAILED_CONNECT_TO_SERVER": \
-     (status) == STATUS_ERR_INVLD_RESP_FROM_SERVER    ? "INVLD_RESP_FROM_SERVER"  : \
-     (status) == STATUS_ERR_USERNAME_LENGTH           ? "USERNAME_LENGTH"         : \
-     (status) == STATUS_ERR_PASSWORD_LENGTH           ? "PASSWORD_LENGTH"         : \
-     (status) == STATUS_ERR_USERNAME_CHARS            ? "USERNAME_CHARS"          : \
-     (status) == STATUS_ERR_PASSWORD_CHARS            ? "PASSWORD_CHARS"          : \
-     (status) == STATUS_ERR_INVALID_USER_OR_PASSWD    ? "ACCESS_DENIED"           : \
-     (status) == STATUS_ERR_INVALID_SERVICE           ? "INVALID_SERVICE"         : \
-     (status) == STATUS_ERR_WC_DOES_NOT_EXIST         ? "WC_DOES_NOT_EXIST"       : \
-     (status) == STATUS_ERR_WC_NOT_ONLINE             ? "WC_NOT_ONLINE"           : \
-     (status) == STATUS_ERR_WC_ADDR_NOT_AVAIL         ? "WC_ADDR_NOT_AVAIL"       : \
-     (status) == STATUS_ERR_USERNAME_ALREADY_EXISTS   ? "USERNAME_ALREADY_EXISTS" : \
-     (status) == STATUS_ERR_TOO_MANY_USERS            ? "TOO_MANY_USERS"          : \
-     (status) == STATUS_ERR_CREATE_USER_PROFILE       ? "CREATE_USER_PROFILE"     : \
+    ((status) == STATUS_INFO_OK                       ? "OK"                             : \
+     (status) == STATUS_INFO_STOPPED                  ? "STOPPED"                        : \
+     (status) == STATUS_INFO_GAP                      ? "GAP"                            : \
+     (status) == STATUS_INFO_LOADING_IMAGE            ? "LOADING_IMAGE"                  : \
+     (status) == STATUS_INFO_CHANGING_RESOLUTION      ? "CHANGING_RESOLUTION"            : \
+     (status) == STATUS_INFO_NOT_RUN                  ? "NOT_RUN"                        : \
+     (status) == STATUS_INFO_IN_PROGRESS              ? "IN_PROGRESS"                    : \
+     (status) == STATUS_ERR_GENERAL_FAILURE           ? "GENERAL_FAILURE"                : \
+     (status) == STATUS_ERR_FRAME_FILE_OFFSET_INVLD   ? "FRAME_FILE_OFFSET_INVLD"        : \
+     (status) == STATUS_ERR_FRAME_FILE_EMPTY          ? "FRAME_FILE_EMPTY"               : \
+     (status) == STATUS_ERR_FRAME_BEFORE_BOD          ? "FRAME_BEFORE_BOD"               : \
+     (status) == STATUS_ERR_FRAME_AFTER_EOD           ? "FRAME_AFTER_EOD"                : \
+     (status) == STATUS_ERR_FRAME_NOT_FOUND_1         ? "FRAME_NOT_FOUND_1"              : \
+     (status) == STATUS_ERR_FRAME_NOT_FOUND_2         ? "FRAME_NOT_FOUND_2"              : \
+     (status) == STATUS_ERR_FRAME_NOT_FOUND_3         ? "FRAME_NOT_FOUND_3"              : \
+     (status) == STATUS_ERR_FRAME_NOT_FOUND_4         ? "FRAME_NOT_FOUND_4"              : \
+     (status) == STATUS_ERR_FRAME_HDR_READ            ? "FRAME_HDR_READ"                 : \
+     (status) == STATUS_ERR_FRAME_HDR_MAGIC           ? "FRAME_HDR_MAGIC"                : \
+     (status) == STATUS_ERR_FRAME_HDR_CHECKSUM        ? "FRAME_HDR_CHECKSUM"             : \
+     (status) == STATUS_ERR_FRAME_DATA_MEM_ALLOC      ? "FRAME_DATA_MEM_ALLOC"           : \
+     (status) == STATUS_ERR_FRAME_DATA_READ           ? "FRAME_DATA_READ"                : \
+     (status) == STATUS_ERR_FRAME_TIME                ? "FRAME_TIME"                     : \
+     (status) == STATUS_ERR_JPEG_DECODE               ? "JPEG_DECODE"                    : \
+     (status) == STATUS_ERR_DEAD                      ? "DEAD"                           : \
+     (status) == STATUS_ERR_WEBCAM_FAILURE            ? "WEBCAM_FAILURE"                 : \
+     (status) == STATUS_ERR_SYSTEM_CLOCK_NOT_SET      ? "SYSTEM_CLOCK_NOT_SET"           : \
+     (status) == STATUS_ERR_NO_USERNAME               ? "NO_USERNAME"                    : \
+     (status) == STATUS_ERR_NO_PASSWORD               ? "NO_PASSWORD"                    : \
+     (status) == STATUS_ERR_HANDLE_TOO_BIG            ? "HANDLE_TOO_BIG"                 : \
+     (status) == STATUS_ERR_GET_SERVER_ADDR           ? "GET_SERVER_ADDR"                : \
+     (status) == STATUS_ERR_CREATE_SOCKET             ? "CREATE_SOCKET"                  : \
+     (status) == STATUS_ERR_GET_LOCAL_ADDR            ? "GET_LOCAL_ADDR"                 : \
+     (status) == STATUS_ERR_BIND_LOCAL_ADDR           ? "BIND_LOCAL_ADDR"                : \
+     (status) == STATUS_ERR_GETSOCKNAME               ? "GETSOCKNAME"                    : \
+     (status) == STATUS_ERR_SENDTO                    ? "SENDTO"                         : \
+     (status) == STATUS_ERR_RECVFROM                  ? "RECVFROM"                       : \
+     (status) == STATUS_ERR_NO_RESPONSE_FROM_SERVER   ? "NO_RESPONSE_FROM_SERVER"        : \
+     (status) == STATUS_ERR_INVALID_CONNECTION_ID     ? "INVALID_CONNECTION_ID"          : \
+     (status) == STATUS_ERR_DUPLICATE_CONNECTION_ID   ? "DUPLICATE_CONNECTION_ID"        : \
+     (status) == STATUS_ERR_TOO_MANY_CONNECTIONS      ? "TOO_MANY_CONNECTIONS"           : \
+     (status) == STATUS_ERR_CONNECTION_MEM_ALLOC      ? "CONNECTION_MEM_ALLOC"           : \
+     (status) == STATUS_ERR_NO_RESPONSE_FROM_PEER     ? "NO_RESPONSE_FROM_PEER"          : \
+     (status) == STATUS_ERR_FAILED_CONNECT_TO_SERVER  ? "FAILED_CONNECT_TO_SERVER"       : \
+     (status) == STATUS_ERR_INVLD_RESP_FROM_SERVER    ? "INVLD_RESP_FROM_SERVER"         : \
+     (status) == STATUS_ERR_USERNAME_LENGTH           ? "USERNAME_LENGTH"                : \
+     (status) == STATUS_ERR_PASSWORD_LENGTH           ? "PASSWORD_LENGTH"                : \
+     (status) == STATUS_ERR_USERNAME_CHARS            ? "USERNAME_CHARS"                 : \
+     (status) == STATUS_ERR_PASSWORD_CHARS            ? "PASSWORD_CHARS"                 : \
+     (status) == STATUS_ERR_INVALID_USER_OR_PASSWD    ? "ACCESS_DENIED"                  : \
+     (status) == STATUS_ERR_INVALID_SERVICE           ? "INVALID_SERVICE"                : \
+     (status) == STATUS_ERR_WC_DOES_NOT_EXIST         ? "WC_DOES_NOT_EXIST"              : \
+     (status) == STATUS_ERR_WC_NOT_ONLINE             ? "WC_NOT_ONLINE"                  : \
+     (status) == STATUS_ERR_WC_ADDR_NOT_AVAIL         ? "WC_ADDR_NOT_AVAIL"              : \
+     (status) == STATUS_ERR_USERNAME_ALREADY_EXISTS   ? "USERNAME_ALREADY_EXISTS"        : \
+     (status) == STATUS_ERR_TOO_MANY_USERS            ? "TOO_MANY_USERS"                 : \
+     (status) == STATUS_ERR_CREATE_USER_PROFILE       ? "CREATE_USER_PROFILE"            : \
                                                         "????")
 
 // mode values

@@ -86,7 +86,7 @@ int main(int argc, char **argv)
     }
 
     // initialize p2p connection module
-    if (p2p_init(2) < 0) {  //XXX bigg needed
+    if (p2p_init(16) < 0) {
         FATAL("p2p_init failed\n");
     }
 

@@ -6,7 +6,7 @@
 // defines
 //
 
-#define MAX_RECV_SAVE_BUFF  0x1000
+#define MAX_RECV_SAVE_BUFF  1000
 
 #define MILLISEC_TIMER      (microsec_timer() / 1000)
 
@@ -28,7 +28,7 @@ typedef struct {
     bool            recv_eof;
     bool            disconnecting;  // xxx new
     pthread_mutex_t send_mutex;
-    char            recv_save_buff[MAX_RECV_SAVE_BUFF];  // XXX maybe allocate
+    char            recv_save_buff[MAX_RECV_SAVE_BUFF];
     uint32_t        recv_save_buff_len;
     stats_t         stats;
     pthread_t       mon_thread_id;
@@ -78,19 +78,18 @@ p2p_routines_t p2p2 = { p2p2_init,
 
 static int p2p2_init(int max_con_arg)
 {
+    // if already initialized then return
+    if (max_con != 0) {
+        return 0;
+    }
+
     // verify max_con is power of 2
-#if 0
-    if (max_con != 1 && max_con != 2 && max_con != 4 && max_con != 8 && max_con != 16 && 
-        max_con != 32 && max_con != 64 && max_con != 128 && max_con != 256 && max_con != 512 && 
-        max_con != 1024)
-#endif
     if (__builtin_popcount(max_con_arg) != 1 || max_con_arg > 1024 || max_con_arg < 0) {
         ERROR("invalid max_con %d\n", max_con_arg);
         return -1;
     }
 
     // allocate con_tbl
-    INFO("XXX SIZE OF ENT %d\n", (int)sizeof(con_tbl[0]));
     max_con = max_con_arg;
     con_tbl = calloc(max_con, sizeof(con_tbl[0]));
     if (con_tbl == NULL) {
@@ -144,7 +143,6 @@ try_again:
     if (handle == 0) {
         handle = (con_tbl_idx + __sync_add_and_fetch(&handle_upper_val,max_con)) & 0x7fffffff;
     }
-    INFO("XXX HANDLE %d\n", handle);
 
     con = &con_tbl[con_tbl_idx];
     bzero(con, sizeof(con_t));

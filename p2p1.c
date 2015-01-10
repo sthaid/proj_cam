@@ -115,6 +115,7 @@ typedef struct con_s {
     pthread_t monitor_thread_id;
 
     bool con_resp_recvd; 
+    int  con_resp_recvd_status;
     bool send_in_prog;
     bool recv_in_prog;
 
@@ -203,17 +204,16 @@ p2p_routines_t p2p1 = { p2p1_init,
 
 // -----------------  P2P_INIT  ----------------------------------------
 
-// XXX unsigned
 int p2p1_init(int max_con_arg)
 {
     int i;
 
+    // if already initialized then return
+    if (max_con != 0) {
+        return 0;
+    }
+
     // verify max_con is power of 2
-#if 0 //XXX
-    if (max_con != 1 && max_con != 2 && max_con != 4 && max_con != 8 && max_con != 16 && 
-        max_con != 32 && max_con != 64 && max_con != 128 && max_con != 256 && max_con != 512 && 
-        max_con != 1024)
-#endif
     if (__builtin_popcount(max_con_arg) != 1 || max_con_arg > 1024 || max_con_arg < 0) {
         ERROR("invalid max_con %d\n", max_con_arg);
         return -1;
@@ -652,6 +652,7 @@ int connect_common(int sfd, struct sockaddr_in * peer_addr, uint64_t con_id, int
     recvbuff_data_valid_entry_t * dve;
     bool                          connect_mutex_acquired = false;
     bool                          mutex_acquired = false;
+    int                           send_error_con_resp_status = STATUS_INFO_OK;
 
     static int                    handle_upper_val;
 
@@ -689,8 +690,7 @@ int connect_common(int sfd, struct sockaddr_in * peer_addr, uint64_t con_id, int
     if (con_tbl_idx == max_con) {
         ERROR("%"PRId64" con_tbl has no free slot for new connection\n", con_id);
         *status = STATUS_ERR_TOO_MANY_CONNECTIONS;
-//XXX send p2p_con_req with recection status,
-//    maybe this could be done at error_ret
+        send_error_con_resp_status = STATUS_ERR_TOO_MANY_CONNECTIONS;
         goto error_ret;
     }
 
@@ -699,7 +699,7 @@ int connect_common(int sfd, struct sockaddr_in * peer_addr, uint64_t con_id, int
     if (con == NULL) {
         ERROR("%"PRId64" con mem alloc failed\n", con_id);
         *status = STATUS_ERR_CONNECTION_MEM_ALLOC;
-// XXX
+        send_error_con_resp_status = STATUS_ERR_CONNECTION_MEM_ALLOC;
         goto error_ret;
     }
 
@@ -763,6 +763,14 @@ int connect_common(int sfd, struct sockaddr_in * peer_addr, uint64_t con_id, int
         sleep_ms(10,&mutex[con_tbl_idx]);
     }
 
+    // if con_resp has been received, but has error indication then return error
+    if (con->con_resp_recvd && con->con_resp_recvd_status != STATUS_INFO_OK) {
+        ERROR("%"PRId64" connect response, %s\n", 
+              con->con_id, status2str(con->con_resp_recvd_status));
+        *status = con->con_resp_recvd_status;
+        goto error_ret;
+    }
+
     // check for timeout establishing the connection
     if (!con->con_resp_recvd) {
         ERROR("%"PRId64" connect response not received\n", con->con_id);
@@ -796,6 +804,16 @@ error_ret:
     }
     if (mutex_acquired) {
         pthread_mutex_unlock(&mutex[con_tbl_idx]);
+    }
+    if (send_error_con_resp_status != STATUS_INFO_OK) {
+        for (i = 0; i < 3; i ++) {
+            dgram.id = DGRAM_ID_P2P_CON_RESP;
+            dgram.u.p2p_con_resp.con_id = con_id;
+            dgram.u.p2p_con_resp.status = send_error_con_resp_status;
+            sendto(sfd, &dgram, offsetof(dgram_t,u.p2p_con_resp.dgram_end), MSG_DONTWAIT,
+                   (struct sockaddr *)peer_addr, sizeof(struct sockaddr_in));
+            sleep_ms(1000, NULL);
+        }
     }
     if (con != NULL) {
         free_con(con_tbl_idx);
@@ -1355,11 +1373,14 @@ void * recv_dgram_thread(void * cx)
             if (con->state == STATE_CONNECTING || con->state == STATE_CONNECTED) {
                 dgram_con_resp.id = DGRAM_ID_P2P_CON_RESP;
                 dgram_con_resp.u.p2p_con_resp.con_id = con->con_id;
+                dgram_con_resp.u.p2p_con_resp.status = STATUS_INFO_OK;
                 send_dgram(con,&dgram_con_resp,offsetof(dgram_t,u.p2p_con_resp.dgram_end));
             }
             break; }
 
         case DGRAM_ID_P2P_CON_RESP:
+            con->con_resp_recvd_status = dgram->u.p2p_con_resp.status;
+            __sync_synchronize();
             con->con_resp_recvd = true;
             break;
 
@@ -1369,6 +1390,8 @@ void * recv_dgram_thread(void * cx)
 
             // since the con_resp dgram might have been lost, we set the con_resp_recvd
             // flag also when received the p2p1_ack and p2p1_data
+            con->con_resp_recvd_status = STATUS_INFO_OK;
+            __sync_synchronize();
             con->con_resp_recvd = true;
 
             // process the acks received
@@ -1391,6 +1414,8 @@ void * recv_dgram_thread(void * cx)
 
             // since the con_resp dgram might have been lost, we set the con_resp_recvd
             // flag also when received the p2p1_ack and p2p1_data
+            con->con_resp_recvd_status = STATUS_INFO_OK;
+            __sync_synchronize();
             con->con_resp_recvd = true;
 
             // get start and end offsets for the local recvbuff and the dgram data buffer
@@ -2223,8 +2248,9 @@ void p2p1_debug_con(int handle)
     PRINTF("time (ms) since:  last_dgram_recvd=%"PRId64" last_stats_dgram_sent=%"PRId64"\n",
            time_ms - con->time_last_dgram_recvd_ms,
            time_ms - con->time_last_stats_dgram_sent_ms);
-    PRINTF("con_resp_recvd=%d send_in_prog=%d recv_in_prog=%d\n",
+    PRINTF("con_resp_recvd=%d con_resp_recvd_status=%d send_in_prog=%d recv_in_prog=%d\n",
            con->con_resp_recvd,
+           con->con_resp_recvd_status,
            con->send_in_prog,
            con->recv_in_prog);
     PRINTF("send_offset=%"PRId64" remote_recvbuff_offset=%"PRId64"\n",
@@ -2325,9 +2351,10 @@ void debug_print_dgram(bool recv, dgram_t * dgram, int length)
               dgram->u.p2p_con_req.con_id);
         break;
     case DGRAM_ID_P2P_CON_RESP:
-        DEBUG("%s P2P_CON_RESP%s con_id=%"PRId64"\n",
+        DEBUG("%s P2P_CON_RESP%s con_id=%"PRId64" status=%d\n",
               dir, len_err_str,
-              dgram->u.p2p_con_resp.con_id);
+              dgram->u.p2p_con_resp.con_id,
+              dgram->u.p2p_con_resp.status);
         break;
     case DGRAM_ID_P2P_ACK:
         DEBUG("%s P2P_ACK%s con_id=%"PRId64" recvbuff_offset=%"PRId64" ack=%d %d %d %d %d %d %d %d %d %d\n",

@@ -400,7 +400,6 @@ int main(int argc, char **argv)
     INFO("STARTING %s\n", argv[0]);
 
     // initialize p2p connection modules
-    // XXX re-initialized on android ?
     p2p = &p2p1;
     if (p2p_init(4) < 0) {
         FATAL("p2p1_init failed\n");
