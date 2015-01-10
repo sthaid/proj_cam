@@ -80,7 +80,7 @@ void * wc_svc_shell(void * cx)
 
     // fork and execute child 
     if ((pid = fork()) == 0) {
-        char * envp[3];
+        char * envp[2];
         char   env_term[200];
 
         // close parents stdin, stdout, stderr
@@ -96,12 +96,11 @@ void * wc_svc_shell(void * cx)
         open(slavename, O_RDWR);
         open(slavename, O_RDWR);
 
-        // exec /bin/bash
+        // login to webcam
         sprintf(env_term, "TERM=%s", msg_init.term);
         envp[0] = env_term;
-        envp[1] = "HOME=/home/pi";
-        envp[2] = NULL;
-        execle("/bin/bash", "-", (char*)NULL, envp);
+        envp[1] = NULL;
+        execle("/usr/bin/sudo", "/usr/bin/sudo", "/bin/login", (char*)NULL, envp);
 
         // not reached
         exit(1);
