@@ -85,8 +85,8 @@ int config_write(char * config_path, config_t * config, int config_version);
 #define MAX_WC_MACADDR                32
 #define MAX_USER_NAME                 32
 #define MAX_PASSWORD                  32
-#define MIN_USER_NAME                 4
-#define MIN_PASSWORD                  4
+#define MIN_USER_NAME                 2
+#define MIN_PASSWORD                  2
 
 #define HTTP_CONNECT_REQ  "CONNECT " ADMIN_SERVER_HOSTNAME ":80 HTTP/1.0\r\n\r\n"
 #define HTTP_CONNECT_RESP "HTTP/1.0 200 OK\r\n\r\n"
@@ -344,15 +344,16 @@ typedef struct {
 #define STATUS_ERR_INVALID_CONNECTION_ID     130
 #define STATUS_ERR_DUPLICATE_CONNECTION_ID   131
 #define STATUS_ERR_TOO_MANY_CONNECTIONS      132
-#define STATUS_ERR_CONNECTION_MEM_ALLOC      134
-#define STATUS_ERR_NO_RESPONSE_FROM_PEER     135
-#define STATUS_ERR_FAILED_CONNECT_TO_SERVER  136
-#define STATUS_ERR_INVLD_RESP_FROM_SERVER    137
-#define STATUS_ERR_USERNAME_LENGTH           138
-#define STATUS_ERR_PASSWORD_LENGTH           139
-#define STATUS_ERR_USERNAME_CHARS            140
-#define STATUS_ERR_PASSWORD_CHARS            141
-#define STATUS_ERR_INVALID_USER_OR_PASSWD    142
+#define STATUS_ERR_CONNECTION_MEM_ALLOC      133
+#define STATUS_ERR_NO_RESPONSE_FROM_PEER     134
+#define STATUS_ERR_FAILED_CONNECT_TO_SERVER  135
+#define STATUS_ERR_INVLD_RESP_FROM_SERVER    136
+#define STATUS_ERR_USERNAME_LENGTH           137
+#define STATUS_ERR_PASSWORD_LENGTH           138
+#define STATUS_ERR_USERNAME_CHARS            139
+#define STATUS_ERR_PASSWORD_CHARS            140
+#define STATUS_ERR_ACCESS_DENIED             141
+#define STATUS_ERR_INVALID_LINK              142
 #define STATUS_ERR_INVALID_SERVICE           143
 #define STATUS_ERR_WC_DOES_NOT_EXIST         144
 #define STATUS_ERR_WC_NOT_ONLINE             145
@@ -360,6 +361,11 @@ typedef struct {
 #define STATUS_ERR_USERNAME_ALREADY_EXISTS   147
 #define STATUS_ERR_TOO_MANY_USERS            148
 #define STATUS_ERR_CREATE_USER_PROFILE       149
+#define STATUS_ERR_WCNAME_CHARS              150
+#define STATUS_ERR_WCNAME_LENGTH             151
+#define STATUS_ERR_WC_ACCESS_LIST_LENGTH     152
+#define STATUS_ERR_MUST_BE_ROOT              153
+
 
 #define STATUS_STR(status) \
     ((status) == STATUS_INFO_OK                       ? "OK"                             : \
@@ -410,7 +416,8 @@ typedef struct {
      (status) == STATUS_ERR_PASSWORD_LENGTH           ? "PASSWORD_LENGTH"                : \
      (status) == STATUS_ERR_USERNAME_CHARS            ? "USERNAME_CHARS"                 : \
      (status) == STATUS_ERR_PASSWORD_CHARS            ? "PASSWORD_CHARS"                 : \
-     (status) == STATUS_ERR_INVALID_USER_OR_PASSWD    ? "ACCESS_DENIED"                  : \
+     (status) == STATUS_ERR_ACCESS_DENIED             ? "ACCESS_DENIED"                  : \
+     (status) == STATUS_ERR_INVALID_LINK              ? "INVALID_LINK"                   : \
      (status) == STATUS_ERR_INVALID_SERVICE           ? "INVALID_SERVICE"                : \
      (status) == STATUS_ERR_WC_DOES_NOT_EXIST         ? "WC_DOES_NOT_EXIST"              : \
      (status) == STATUS_ERR_WC_NOT_ONLINE             ? "WC_NOT_ONLINE"                  : \
@@ -418,6 +425,10 @@ typedef struct {
      (status) == STATUS_ERR_USERNAME_ALREADY_EXISTS   ? "USERNAME_ALREADY_EXISTS"        : \
      (status) == STATUS_ERR_TOO_MANY_USERS            ? "TOO_MANY_USERS"                 : \
      (status) == STATUS_ERR_CREATE_USER_PROFILE       ? "CREATE_USER_PROFILE"            : \
+     (status) == STATUS_ERR_WCNAME_CHARS              ? "WCNAME_CHARS"                   : \
+     (status) == STATUS_ERR_WCNAME_LENGTH             ? "WCNAME_LENGTH"                  : \
+     (status) == STATUS_ERR_WC_ACCESS_LIST_LENGTH     ? "ACCESS_LIST_LENGTH"             : \
+     (status) == STATUS_ERR_MUST_BE_ROOT              ? "MUST_BE_ROOT"                   : \
                                                         "????")
 
 // mode values
