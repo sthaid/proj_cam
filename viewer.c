@@ -318,6 +318,7 @@ event_t          event;
 
 char             config_path[MAX_STR];
 const int        config_version = 1;
+#if 0
 config_t         config[] = { { "username",  NO_USERNAME },
                               { "password",  NO_PASSWORD },
                               { "proxy",     "N"         },
@@ -326,9 +327,22 @@ config_t         config[] = { { "username",  NO_USERNAME },
                               { "wc_name_B", NO_WCNAME   },
                               { "wc_name_C", NO_WCNAME   },
                               { "wc_name_D", NO_WCNAME   },
-                              { "zoom",      "A",        },
+                              { "zoom",      "N",        },
                               { "debug",     "N"         },
                               { "",          ""          } };
+#else
+config_t         config[] = { { "username",  "demo"        },
+                              { "password",  "demo"        },
+                              { "proxy",     "N"           },
+                              { "localtime", "Y"           },
+                              { "wc_name_A", "st_backyard" },
+                              { "wc_name_B", NO_WCNAME     },
+                              { "wc_name_C", NO_WCNAME     },
+                              { "wc_name_D", NO_WCNAME     },
+                              { "zoom",      "N",          },
+                              { "debug",     "N"           },
+                              { "",          ""            } };
+#endif
 
 //
 // prototypes
@@ -992,7 +1006,7 @@ void display_handler(void)
         } else if (event.mouse_event == MOUSE_EVENT_CONFIG_KEY_ENTER) {
             if (config_keybd_mode == CONFIG_KEYBD_MODE_USERNAME) {
                 len = strlen(config_keybd_str);
-                if (len >= MIN_USER_NAME && len <= MAX_USER_NAME) {
+                if (len >= MIN_USERNAME && len <= MAX_USERNAME) {
                     strcpy(CONFIG_USERNAME, config_keybd_str);
                 } else {
                     strcpy(CONFIG_USERNAME, NO_USERNAME);
