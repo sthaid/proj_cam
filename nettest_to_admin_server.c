@@ -19,12 +19,12 @@ void nettest_to_admin_server(char * user_name, char * password);
 int main(int argc, char **argv)
 {
     struct rlimit rl;
-    char        * user_name;
-    char        * password;
     int           ret;
     char          opt_char;
+    char        * user_name  = NULL;
+    char        * password   = NULL;
     bool          debug_mode = false;
-    bool          help_mode = false;
+    bool          help_mode  = false;
 
     // set resource limti to allow core dumps
     rl.rlim_cur = RLIM_INFINITY;
@@ -33,10 +33,6 @@ int main(int argc, char **argv)
     if (ret < 0) {
         WARN("setrlimit for core dump, %s\n", strerror(errno));
     }
-
-    // get user_name and password from environment
-    user_name = getenv("WC_USER_NAME");
-    password  = getenv("WC_PASSWORD");
 
     // parse options
     while (true) {
@@ -72,8 +68,8 @@ int main(int argc, char **argv)
     // verify user_name, password, and args
     if (help_mode || (user_name == NULL) || (password == NULL) || (argc-optind != 0)) {
         PRINTF("usage: wc_nettest_server\n");
-        PRINTF("  -u <user_name>: override WC_USER_NAME environment value\n");
-        PRINTF("  -p <password>: override WC_PASSWORD environment value\n");
+        PRINTF("  -u <user_name>: user_name\n");
+        PRINTF("  -p <password>: password\n");
         PRINTF("  -h: display this help text\n");
         PRINTF("  -d: enable debug mode\n");
         PRINTF("  -v: display version and exit\n");
@@ -96,6 +92,7 @@ void nettest_to_admin_server(char * user_name, char * password)
     long  start1, end1, start2, end2;
     char  buff[ADMIN_SERVER_MAX_NETTEST_BUFF];
     int   connect_status;
+    long  total_send_time_us=0, total_recv_time_us=0;
 
     // connect to admin_server
     sfd = connect_to_admin_server(user_name, password, "nettest", &connect_status);
@@ -116,7 +113,7 @@ void nettest_to_admin_server(char * user_name, char * password)
     buff[sizeof(buff)-1] = 0x77;
 
     // start testing
-    for (i = 0; i < 10; i++) {
+    for (i = 0; i < 5; i++) {
         // client->server test
         // . save start time, and 
         // . send data to server
@@ -151,8 +148,18 @@ void nettest_to_admin_server(char * user_name, char * password)
 
         // print result 
         PRINTF("%10d        %10d\n",
-             (int)((8 * sizeof(buff)) / (end1 - start1)),
-             (int)((8 * sizeof(buff)) / (end2 - start2)));
+               (int)((8 * sizeof(buff)) / (end1 - start1)),
+               (int)((8 * sizeof(buff)) / (end2 - start2)));
+
+        // accumulate time for average result
+        total_send_time_us += (end1 - start1);
+        total_recv_time_us += (end2 - start2);
     }
+
+    // print average 
+    PRINTF("%10s        %10s\n", "------", "------");
+    PRINTF("%10.1f        %10.1f\n",
+           (double)(i * 8 * sizeof(buff)) / total_send_time_us,
+           (double)(i * 8 * sizeof(buff)) / total_recv_time_us);
 }
 
