@@ -1,7 +1,5 @@
 #include "wc.h"
 
-// TBD LATER - improve debug interfaces
-
 //
 // defines
 //
@@ -58,7 +56,7 @@ int main(int argc, char **argv)
     struct rlimit  rl;
     pthread_t      thread;
     int            i, ret, tries, handle, service;
-    char           user_name[MAX_USER_NAME+1];
+    char           user_name[MAX_USERNAME+1];
     char           opt_char;
     pthread_attr_t thread_attr;
 

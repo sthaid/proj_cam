@@ -1,12 +1,5 @@
 #include "wc.h"
 
-// TBD - doc on setting tuning defines
-// TBD - tcpdump, verify no icmp packets, and verify no ip fragmentation, verify MAX_DATA 1472
-// TBD - add code to connect_common to validate the mutexes are working, (trylock and release)
-
-// TBD LATER - p2p_send with iov
-// TBD LATER - may want to progressively back off until a max resend time is reached, see TIME_RESEND_MS
-
 // 
 // defines
 //
@@ -622,8 +615,8 @@ try_again:
 
         // return the user_name and service to caller
         *service = dgram.u.connect_activate.service;
-        strncpy(user_name, dgram.u.connect_activate.user_name, MAX_USER_NAME);
-        user_name[MAX_USER_NAME] = '\0';
+        strncpy(user_name, dgram.u.connect_activate.user_name, MAX_USERNAME);
+        user_name[MAX_USERNAME] = '\0';
 
         // we got the needed peer_addr and con_id
         peer_addr = dgram.u.connect_activate.client_addr;

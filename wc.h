@@ -48,7 +48,7 @@
 // -----------------  VERSION  ------------------------------------------------------
 
 #define VERSION_MAJOR 1
-#define VERSION_MINOR 3
+#define VERSION_MINOR 0
 
 #define VERSION ( { version_t v = { VERSION_MAJOR, VERSION_MINOR }; v; } );
 
@@ -83,9 +83,9 @@ int config_write(char * config_path, config_t * config, int config_version);
 #define MAX_USER_WC                   32
 #define MAX_WC_NAME                   32
 #define MAX_WC_MACADDR                32
-#define MAX_USER_NAME                 32
+#define MAX_USERNAME                  32
 #define MAX_PASSWORD                  32
-#define MIN_USER_NAME                 2
+#define MIN_USERNAME                  2
 #define MIN_PASSWORD                  2
 
 #define HTTP_CONNECT_REQ  "CONNECT " ADMIN_SERVER_HOSTNAME ":80 HTTP/1.0\r\n\r\n"
@@ -197,7 +197,7 @@ typedef struct {
             char dgram_end;
         } wc_announce;
         struct {
-            char user_name[MAX_USER_NAME+1];
+            char user_name[MAX_USERNAME+1];
             char password[MAX_PASSWORD+1];
            char wc_name[MAX_WC_NAME+1];
             int service;
@@ -207,7 +207,7 @@ typedef struct {
         } connect_req;
         struct {
             uint64_t con_id;
-            char user_name[MAX_USER_NAME+1];
+            char user_name[MAX_USERNAME+1];
             int service;
             struct sockaddr_in client_addr;
             struct sockaddr_in wc_addr;

@@ -47,7 +47,7 @@ int main(int argc, char **argv)
     }
 
     // get user_name and password from environment
-    user_name = getenv("WC_USER_NAME");
+    user_name = getenv("WC_USERNAME");
     password  = getenv("WC_PASSWORD");
 
     // parse options
@@ -89,7 +89,7 @@ int main(int argc, char **argv)
     if (help_mode || (user_name == NULL) || (password == NULL) || (argc-optind != 1)) {
         PRINTF("usage: nettest_to_wc <wc_name>\n");
         PRINTF("  -P: use proxy server\n");
-        PRINTF("  -u <user_name>: override WC_USER_NAME environment value\n");
+        PRINTF("  -u <user_name>: override WC_USERNAME environment value\n");
         PRINTF("  -p <password>: override WC_PASSWORD environment value\n");
         PRINTF("  -h: display this help text\n");
         PRINTF("  -d: enable debug mode\n");
