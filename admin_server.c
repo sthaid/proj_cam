@@ -1,10 +1,7 @@
 #include "wc.h"
 
-// XXX 01/08/15 17:47:52 ERROR service_thread: reading http connect request, len=-1, Resource temporarily unavailable
-// XXX nettest, print avg
-// XXX need cmd to set access list
-// XXX alphatize users in cmd_ls
-// XXX some locking needed  
+// XXX alphatize cmd_ls user list
+// XXX locking needed  
 
 //
 // defines
@@ -39,14 +36,14 @@ typedef struct {
             char wc_access_list[MAX_WC_ACCESS_LIST+1];
         } owner;
         struct {
-            char user_name[MAX_USER_NAME+1];
+            char user_name[MAX_USERNAME+1];
             char wc_name[MAX_WC_NAME+1];
         } link;
     } u;
 } user_wc_t;
 
 typedef struct {
-    char     user_name[MAX_USER_NAME+1];
+    char     user_name[MAX_USERNAME+1];
     char     password[MAX_PASSWORD+1];
     struct   timeval time_created;
     user_wc_t wc[MAX_USER_WC];
@@ -87,6 +84,7 @@ bool cmd_help(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_add_wc(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_ren_wc(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_del_wc(user_t * u, FILE * fp, int argc, char ** argv);
+bool cmd_set_wc_access(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_ls(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_password(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_delete_account(user_t * u, FILE * fp, int argc, char ** argv);
@@ -496,6 +494,8 @@ cmd_tbl_t cmd_tbl[] = {
       "ren_wc <wc_name> <new_wc_name> - rename webcam" },
     { "del_wc", cmd_del_wc, 1, 1, false,
       "del_wc <wc_name> - delete webcam" },
+    { "set_wc_access", cmd_set_wc_access, 1, 2, false,
+      "set_wc_access <wc_name> <access_list> - set list of users permitted access" },
     { "ls", cmd_ls, 0, 2, false,
       "ls [-v] [everyone|unclaimed|<user_name>] - list webcams" },
     { "password", cmd_password, 2, 2, false,
@@ -600,7 +600,7 @@ bool cmd_add_wc(user_t * u, FILE * fp, int argc, char ** argv)
     char      * wc_access_list = (argc > 2 ? argv[2] : NULL);
     user_wc_t * wc;
     int         i, status;
-    char        link_user_name[MAX_USER_NAME+1];
+    char        link_user_name[MAX_USERNAME+1];
     char        link_wc_name[MAX_WC_NAME+1];
 
     // argv[0] is the name of the webcam being added
@@ -690,7 +690,7 @@ bool cmd_add_wc(user_t * u, FILE * fp, int argc, char ** argv)
         bzero(wc, sizeof(user_wc_t));
         strncpy(wc->wc_name, wc_name, MAX_WC_NAME);
         wc->is_owner = false;
-        strncpy(wc->u.link.user_name, link_user_name, MAX_USER_NAME);
+        strncpy(wc->u.link.user_name, link_user_name, MAX_USERNAME);
         strncpy(wc->u.link.wc_name, link_wc_name, MAX_WC_NAME);
         update_user_file(u);
 
@@ -757,6 +757,40 @@ bool cmd_del_wc(user_t * u, FILE * fp, int argc, char ** argv)
 
     // store change in file
     update_user_file(u);
+
+    // return, no-logout
+    return false;
+}
+
+// set_wc_access <wc_name> <access_list> - set list of users permitted access
+bool cmd_set_wc_access(user_t * u, FILE * fp, int argc, char ** argv) 
+{
+    char * wc_name = argv[0];
+    char * wc_access_list = (argc == 2 ? argv[1] : "");
+    user_wc_t * wc;
+    int status;
+
+    // find wc_name in this user wc tbl
+    wc = find_user_wc_from_user_and_name(u,wc_name);
+    if (wc == NULL) {
+        prcl(fp, "error: does not exist '%s'\n", wc_name);
+        return false;
+    }
+
+    // verify wc is_owner
+    if (!wc->is_owner) {
+        prcl(fp, "error: access list not allowed on wc link\n");
+        return false;
+    }
+
+    // verify access_list string is properly formatted
+    if (!verify_wc_access_list(wc_access_list, &status)) {
+        prcl(fp, "error: invalid access list '%s'\n", wc_access_list);
+        return false;
+    }
+
+    // set the new access list
+    strncpy(wc->u.owner.wc_access_list, wc_access_list, MAX_WC_ACCESS_LIST);
 
     // return, no-logout
     return false;
@@ -1546,7 +1580,7 @@ bool verify_user_name(char * user_name, int * status)
 {
     int len = strlen(user_name);
 
-    if (len < MIN_USER_NAME || len > MAX_USER_NAME) {
+    if (len < MIN_USERNAME || len > MAX_USERNAME) {
         *status = STATUS_ERR_USERNAME_LENGTH;
         return false;
     }
@@ -1932,8 +1966,8 @@ void * dgram_thread(void * cx)
             dgram_snd.u.connect_activate.service = dgram_rcv.u.connect_req.service;
             strncpy(dgram_snd.u.connect_activate.user_name, 
                     dgram_rcv.u.connect_req.user_name, 
-                    MAX_USER_NAME);
-            dgram_snd.u.connect_activate.user_name[MAX_USER_NAME] = '\0';
+                    MAX_USERNAME);
+            dgram_snd.u.connect_activate.user_name[MAX_USERNAME] = '\0';
             if (client_addr->sin_addr.s_addr == wc_addr->sin_addr.s_addr) {
                 dgram_snd.u.connect_activate.client_addr = dgram_rcv.u.connect_req.client_addr_behind_nat;
                 dgram_snd.u.connect_activate.wc_addr    = *wc_addr_behind_nat;
