@@ -1,6 +1,5 @@
 #!/bin/bash
 
-host=$1
 if [ $# -eq 0 ]
 then
   echo hostname list expected

@@ -1,5 +1,5 @@
 // downloaded button-50.wav from http://www.soundjay.com/button-sounds-5.html, and
-// converted to this file using tools/bin2hdr.c
+// converted to this file using bin/bin2hdr.c
 
 uint8_t button_sound_wav[25988] = {
     /*     0 */ 0x52, 0x49, 0x46, 0x46, 0x7c, 0x65, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45, 0x62, 0x65, 0x78, 0x74, 
