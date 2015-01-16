@@ -7,7 +7,6 @@
 
 // XXX is locking needed around SDL_UpdateTexture
 // XXX changing Android orientatiton not always working
-// XXX should handle SDL_WINDOWEVENT_MINIMIZED / RESTORED, pause data feed
 // XXX mode locking
 
 //
@@ -281,6 +280,10 @@ typedef struct {
     int      window_resize_width;
     int      window_resize_height;
 
+    bool     window_restored_event;
+
+    bool     window_minimized_event;
+
     bool     quit_event;
     int      quit_event_reason;
 } event_t;
@@ -307,6 +310,7 @@ SDL_Window     * window;
 SDL_Renderer   * renderer;
 int              win_width;
 int              win_height;
+bool             win_minimized;
 
 font_t           font[MAX_FONT];
 
@@ -387,6 +391,7 @@ int main(int argc, char **argv)
     renderer = NULL;
     win_width = 0;
     win_height = 0;
+    win_minimized = false;
     bzero(font, sizeof(font));
     button_sound = NULL;
     bzero(webcam, sizeof(webcam));
@@ -778,6 +783,14 @@ void display_handler(void)
                 event.window_resize_event = true;
                 PLAY_BUTTON_SOUND();
                 break;
+            case SDL_WINDOWEVENT_MINIMIZED:
+                event.window_minimized_event = true;
+                PLAY_BUTTON_SOUND();
+                break;
+            case SDL_WINDOWEVENT_RESTORED:
+                event.window_restored_event = true;
+                PLAY_BUTTON_SOUND();
+                break;
             }
             break; }
 
@@ -796,8 +809,13 @@ void display_handler(void)
             break; }
         }
 
-        // break if mouse_event or quit_event is set
-        if (event.mouse_event != MOUSE_EVENT_NONE || event.quit_event) {
+        // break if mouse_event, window event or quit_event is set
+        if (event.mouse_event != MOUSE_EVENT_NONE || 
+            event.window_resize_event ||
+            event.window_minimized_event ||
+            event.window_restored_event ||
+            event.quit_event) 
+        {
             break; 
         }
     }
@@ -814,11 +832,23 @@ void display_handler(void)
         return;
     }
 
-    // window resize event
+    // window events
     if (event.window_resize_event) {
         win_width = event.window_resize_width;
         win_height = event.window_resize_height;
         event.window_resize_event = false;
+        event_handled = true;
+    }
+
+    if (event.window_minimized_event) {
+        win_minimized = true;
+        event.window_minimized_event = false;
+        event_handled = true;
+    }
+
+    if (event.window_restored_event) {
+        win_minimized = false;
+        event.window_restored_event = false;
         event_handled = true;
     }
 
@@ -2036,7 +2066,7 @@ void * webcam_thread(void * cx)
     uint64_t         last_status_msg_recv_time_us = microsec_timer();
     uint64_t         last_frame_recv_time_us = microsec_timer();
     uint64_t         last_highlight_enable_time_us = microsec_timer();
-    char             last_zoom = '-';
+    uint64_t         last_intvl_us = -1;
 
     INFO("THREAD %d STARTING\n", id);
 
@@ -2102,7 +2132,7 @@ void * webcam_thread(void * cx)
             last_status_msg_recv_time_us = microsec_timer();
             last_frame_recv_time_us = microsec_timer();
             last_highlight_enable_time_us = microsec_timer();
-            last_zoom = '-';  // invalid zoom value
+            last_intvl_us = -1;
             bzero(&wc->mode, sizeof(struct mode_s));
             bzero(&wc->status, sizeof(struct status_s));
             wc->frame_status = STATUS_INFO_OK;
@@ -2111,12 +2141,13 @@ void * webcam_thread(void * cx)
 
         case STATE_CONNECTED: {
             webcam_msg_t msg;
-            int          ret, tmp_zoom;
+            int          ret;
             uint32_t     data_len, width, height;
             uint8_t      data[RP_MAX_FRAME_DATA_LEN];
             uint8_t    * image;
             uint64_t     curr_us;
             char         int_str[MAX_INT_STR];
+            uint64_t     intvl_us;
 
             // if mode has changed then 
             // - perform initialization when entering the LIVE or PLAYBACK mode
@@ -2165,12 +2196,22 @@ void * webcam_thread(void * cx)
                 }
             }
 
-            // if zoom has changed then send message to webcam to adjust the
-            // frame webcam's frame xmit interval
-            tmp_zoom = CONFIG_ZOOM;
-            if (tmp_zoom != last_zoom) {
-                uint64_t intvl_us = (tmp_zoom == 'A'+id ? 0 : tmp_zoom == 'N' ? 150*MS : 250*MS);
+            // determine the minimum interval that viewer desires the webcam to be sending frames:
+            // - when viewer is not shown (minimized)  use a very long interval
+            // - when wc pane is large use min interval of 0, allowing the webcam to send a frame
+            //   as soon as it is available
+            // - when wc pane is medium set the minimum interval to 150 ms
+            // - when wc pane is small set the minimum interval to 250 ms
+            if (win_minimized) {
+                intvl_us = 1000000000;  // 1000 secs
+            } else {
+                int tmp_zoom = CONFIG_ZOOM;
+                intvl_us = (tmp_zoom == 'A'+id ? 0 : tmp_zoom == 'N' ? 150*MS : 250*MS);
+            }
 
+            // if the minimum interval has changed since the last value sent to webcam then
+            // send the new minimum interval
+            if (intvl_us != last_intvl_us) {
                 INFO("wc %c: send MSG_TYPE_CMD_SET_MIN_SEND_INTVL_US intvl=%"PRId64" us\n", id_char, intvl_us);
                 bzero(&msg,sizeof(msg));
                 msg.msg_type = MSG_TYPE_CMD_SET_MIN_SEND_INTVL_US;   
@@ -2179,7 +2220,7 @@ void * webcam_thread(void * cx)
                     STATE_CHANGE(STATE_CONNECTED_ERROR, "ERROR", "send intvl msg", "");
                     break;
                 }
-                last_zoom = tmp_zoom;
+                last_intvl_us = intvl_us;
             }
 
             // process resolution change request
@@ -2209,7 +2250,10 @@ void * webcam_thread(void * cx)
             // if an error condition exists then display the error
             bool no_status_msg = (curr_us - last_status_msg_recv_time_us > 10000000);
             bool no_live_frame = (mode.mode == MODE_LIVE && curr_us - last_frame_recv_time_us > 10000000);
-            if (no_status_msg || no_live_frame) {
+            if (win_minimized) {
+                DISPLAY_TEXT("WINDOW MINIMIZED", "", "");
+                last_frame_recv_time_us = curr_us;
+            } else if (no_status_msg || no_live_frame) {
                 char * info_str = (no_status_msg && no_live_frame ? "NOTHING RCVD" :
                                    no_status_msg                  ? "NO STATUS MSG" :
                                    no_live_frame                  ? "NO LIVE FRAME" :

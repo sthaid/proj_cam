@@ -338,9 +338,6 @@ void * wc_svc_webcam(void * cx)
                 DEBUG("received MSG_TYPE_CMD_SET_MIN_SEND_INTVL_US - intvl=%"PRId64"\n", 
                        msg.u.mt_cmd_min_send_intvl.us);
                 min_send_intvl_us = msg.u.mt_cmd_min_send_intvl.us;
-                if (min_send_intvl_us > 1000000) {
-                    min_send_intvl_us = 1000000;
-                }
                 break;
 
             default:
@@ -1172,7 +1169,7 @@ void compare_gs_image(uint8_t * gs1, uint32_t gs1_w, uint32_t gs1_h, uint8_t * g
     // - at least three boxex have 3% pixels different
     *motion = (box10cnt >= 1 || box5cnt >= 2 || box3cnt >= 3);
 
-#if 0  
+#if 0
     // enable this to simulate continuous motion
     *motion = true;
 #endif
