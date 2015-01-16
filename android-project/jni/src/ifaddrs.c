@@ -22,6 +22,17 @@ ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
 SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 */
 
+//
+// Change Log:
+//
+// Steven Haid   Dec 9, 2014
+// . Use calloc instead of malloc so allocated memory is zeroed. 
+//   This ensures returned sin_port field is 0.
+// . Use mutex to single thread execution. This fixes occasional hangs
+//   that I've observed when getifaddrs is called simultaneously on 
+//   multiple threads.
+//
+
 #include "ifaddrs.h"
 
 #include <string.h>
