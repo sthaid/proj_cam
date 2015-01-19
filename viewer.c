@@ -453,8 +453,10 @@ int main(int argc, char **argv)
     // it is important that the viewer and the webcam computers have their 
     // clocks in sync; the webcam computers use ntp; unfortunately my Android tablet 
     // (which viewer runs on) does not have an option to sync to network time, so this
-    // call is made to sync the time that is returned to viewer by get_real_time_us
-    real_time_init();
+    // call is made to check if ntp is synced; and if it is not synced then to determine
+    // a time offset which is incorporated in the time returned by calls to 
+    // get_real_time_us and get_real_time_sec
+    ntp_init();
 
     // call server_check to verify login to admin server, and 
     // get the list of webcams owned by this user
@@ -1157,7 +1159,7 @@ void display_handler(void)
     // create the data_and_tims_str
     time_t secs;
     if (mode.mode == MODE_LIVE) {
-        secs = get_real_time_us() / 1000000;
+        secs = get_real_time_sec();
         time2str(date_and_time_str, secs, CONFIG_LOCALTIME=='N');
     } else if (mode.mode == MODE_PLAYBACK) {
         if (mode.pb_submode == PB_SUBMODE_PLAY) {
@@ -2271,7 +2273,9 @@ void * webcam_thread(void * cx)
 
             // if an error condition exists then display the error
             bool no_status_msg = (curr_us - last_status_msg_recv_time_us > 10000000);
-            bool no_live_frame = (mode.mode == MODE_LIVE && curr_us - last_frame_recv_time_us > 10000000);
+            bool no_live_frame = (mode.mode == MODE_LIVE && 
+                                  wc->status.cam_status == STATUS_INFO_OK &&
+                                  curr_us - last_frame_recv_time_us > 10000000);
             if (win_minimized) {
                 DISPLAY_TEXT("WINDOW MINIMIZED", "", "");
                 last_frame_recv_time_us = curr_us;

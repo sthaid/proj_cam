@@ -469,7 +469,7 @@ void logmsg(char *lvl, const char *func, char *fmt, ...)
 
         // print the preamble and msg
         cnt = fprintf(logmsg_fp, "%s %s %s: %s\n",
-                      time2str(time_str, time(NULL), false),
+                      time2str(time_str, get_real_time_sec(), false),
                       lvl, func, msg);
 
         // keep track of file size
@@ -500,7 +500,7 @@ void logmsg(char *lvl, const char *func, char *fmt, ...)
     } else {
         // logging to stderr
         cnt = fprintf(stderr, "%s %s %s: %s\n",
-                      time2str(time_str, time(NULL), false),
+                      time2str(time_str, get_real_time_sec(), false),
                       lvl, func, msg);
     }
 }
@@ -654,7 +654,7 @@ void convert_yuy2_to_gs(uint8_t * yuy2, uint8_t * gs, int pixels)
 // -----------------  TIME UTILS  -----------------------------------------
 
 int64_t system_clock_offset_us;
-static void sntp_query(void);
+static int64_t sntp_query(void);
 
 uint64_t microsec_timer(void)
 {
@@ -662,6 +662,11 @@ uint64_t microsec_timer(void)
 
     clock_gettime(CLOCK_MONOTONIC,&ts);
     return  ((uint64_t)ts.tv_sec * 1000000) + ((uint64_t)ts.tv_nsec / 1000);
+}
+
+time_t get_real_time_sec(void)
+{
+    return get_real_time_us() / 1000000;
 }
 
 uint64_t get_real_time_us(void)
@@ -706,33 +711,46 @@ char * time2str(char * str, time_t time, bool gmt)
 bool ntp_synced(void)
 {
     FILE * fp;
-    int    len, cnt, stratum=0;
-    char   s[100] = "";
-    bool   ntp_is_synced;
+    char   s[100];
+    bool   synced = false;
 
+    // Raspberry Pi uses ntpq
     fp = popen("ntpq -c \"rv 0 stratum\" < /dev/null 2>&1", "re");
-    if (fp == NULL) {
-        ERROR("popen, %s\n", strerror(errno));
-        return false;
+    if (fp != NULL) {
+        int cnt=0, stratum=0;
+        if (fgets(s, sizeof(s), fp) != NULL) {
+            cnt = sscanf(s, "stratum=%d", &stratum);
+            synced = (cnt == 1 && stratum > 0 && stratum < 16);
+        }
+        fclose(fp);
+        if (synced) {
+            INFO("return synced (ntpq stratum=%d okay)\n", stratum);
+            return true;
+        }
     }
 
-    fgets(s, sizeof(s), fp);
-    len = strlen(s);
-    if (len > 0 && s[len-1] == '\n') {
-        s[len-1] = '\0';
+    // Fedora 20 uses timedatectl
+    fp = popen("timedatectl status < /dev/null 2>&1", "re");
+    if (fp != NULL) {
+        while (fgets(s, sizeof(s), fp) != NULL) {
+            if (strcmp(s, "NTP synchronized: yes\n") == 0) {
+                synced = true;
+                break;
+            }
+        }
+        fclose(fp);
+        if (synced) {
+            INFO("return synced (timedatectl okay)\n");
+            return true;
+        }
     }
 
-    cnt = sscanf(s, "stratum=%d", &stratum);
-    ntp_is_synced = (cnt == 1 && stratum < 16);
-
-    INFO("ntpq returned '%s' - ntp_is_synced=%d\n", s, ntp_is_synced);
-
-    fclose(fp);
-
-    return ntp_is_synced;
+    // return false
+    INFO("return notsynced\n");
+    return false;
 }
 
-void real_time_init(void)
+void ntp_init(void)
 {
     // if ntp is okay then it is taking care of time sync, so just return
     if (ntp_synced()) {
@@ -741,10 +759,10 @@ void real_time_init(void)
     }
 
     // determine real_time_clock_offset using sntp
-    sntp_query();
+    system_clock_offset_us = sntp_query();
 }
 
-static void sntp_query(void)
+static int64_t sntp_query(void)
 {
     #define MAX_SERVER_LIST     (sizeof(server_name_list)/sizeof(char*))
     #define NTP_PORT            123
@@ -785,6 +803,7 @@ static void sntp_query(void)
     socklen_t          server_addr_len;
     struct timeval     rcvto;
     char               s[100];
+    int64_t            sys_clk_off_us = 0;
 
     // documentation:
     //  - https://tools.ietf.org/html/rfc4330#section-5
@@ -794,7 +813,7 @@ static void sntp_query(void)
     sfd = socket(AF_INET, SOCK_DGRAM|SOCK_CLOEXEC, IPPROTO_UDP);
     if (sfd == -1) {
         ERROR("socket, %s\n",strerror(errno));
-        return;
+        return 0;
     }
     memset(&local_addr, 0, sizeof(local_addr));
     local_addr.sin_family      = AF_INET;
@@ -803,7 +822,7 @@ static void sntp_query(void)
     if (bind(sfd, (struct sockaddr *)&local_addr, sizeof(local_addr)) < 0) {
         ERROR("bind, %s\n",strerror(errno));
         close(sfd);
-        return;
+        return 0;
     }
 
     // loop over the list of candidate ntp servers
@@ -877,7 +896,6 @@ static void sntp_query(void)
         //   The roundtrip delay d and system clock offset t are defined as:
         //
         //   d = (T4 - T1) - (T3 - T2)     t = ((T2 - T1) + (T3 - T4)) / 2.
-        int64_t sys_clk_off_us;
         int64_t round_trip_delay_us;
         sys_clk_off_us = ((receive_timestamp - originate_timestamp) + 
                                   (transmit_timestamp - destination_timestamp)) / 2;
@@ -897,18 +915,16 @@ static void sntp_query(void)
         // if round_trip_delay is too big we won't use this
         if (round_trip_delay_us > 500000) {
             ERROR("round_trip_delay %"PRId64" is too big\n", round_trip_delay_us);
+            sys_clk_off_us = 0;
             continue;
         }
 
-        // publish the new system clock offset
-        system_clock_offset_us = sys_clk_off_us;
-
         // print success message
-        INFO("success: server=%s %s, stratum=%d, system_clock_offset %"PRId64" us\n", 
+        INFO("success: server=%s %s, stratum=%d, sys_clk_off_us %"PRId64" us\n", 
              server_name, 
              sock_addr_to_str(s, sizeof(s), (struct sockaddr *)&server_addr),
              stratum,
-             system_clock_offset_us);
+             sys_clk_off_us);
         break;
     }
 
@@ -917,8 +933,12 @@ static void sntp_query(void)
 
     // if failed then print error
     if (i == MAX_SERVER_LIST) {
-        ERROR("failed to determine system_clock_offset_us\n");
+        ERROR("failed to determine sys_clk_off_us\n");
+        return 0;
     }
+
+    // return sys_clk_off_us
+    return sys_clk_off_us;
 }
     
 // -----------------  FILE SYSTEM UTILS  ----------------------------------
