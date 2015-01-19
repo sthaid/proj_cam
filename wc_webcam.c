@@ -75,6 +75,7 @@ SOFTWARE.
 #define RP_MAX_FRAME_FILE_OFFSET  (rp_file_size - 1000000)
 #define RP_MIN_FILE_FREE_SIZE     2000000
 #define RP_MIN_FILE_SIZE          100000000
+#define RP_MAX_FILE_SIZE          (100000000000LL)
 #define RP_FS_AVAIL_SIZE          100000000
 
 #define RP_MAX_TOC                10000000
@@ -1292,6 +1293,7 @@ int rp_open_file(void)
     // determine rp_file_size;
     // - leave RP_FS_AVAIL_SIZE available after file is created
     // - minimum size of file is RP_MIN_FILE_SIZE
+    // - limit rp_file_size to max of RP_MAX_FILE_SIZE
     // - size is rounded to multible of 1000000
     strcpy(dirpath, RP_FILE_NAME);
     avail_bytes = fs_avail_bytes(dirname(dirpath));
@@ -1301,6 +1303,9 @@ int rp_open_file(void)
         return -1;
     }
     rp_file_size = (avail_bytes - RP_FS_AVAIL_SIZE);
+    if (rp_file_size > RP_MAX_FILE_SIZE) {
+        rp_file_size = RP_MAX_FILE_SIZE;
+    }
     rp_file_size -= (rp_file_size % 1000000);
 
     // create empty file
