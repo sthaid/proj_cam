@@ -1,7 +1,0 @@
-PACKAGES
---------
-
-yum install SDL2-devel SDL2_ttf-devel
-yum install libjpeg-turbo-devel
-yum install readline-devel
-
