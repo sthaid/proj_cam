@@ -67,7 +67,7 @@ typedef struct {
 typedef struct {
     char     user_name[MAX_USERNAME+1];
     char     password[MAX_PASSWORD+1];
-    struct   timeval time_created;
+    char     reserver[22];
     user_wc_t wc[MAX_USER_WC];
 } user_t;
 
@@ -397,7 +397,6 @@ void account_init(void)
         bzero(u,sizeof(user_t));
         strcpy(u->user_name, "root");
         strcpy(u->password, "su");
-        gettimeofday(&u->time_created, NULL);
         if (!create_user_file(u)) {
             FATAL("create_user_file root\n");
         }
@@ -435,7 +434,6 @@ int account_create(char * user_name, char * password)
     bzero(u,sizeof(user_t));
     strcpy(u->user_name, user_name);
     strcpy(u->password, password);
-    gettimeofday(&u->time_created, NULL);
 
     // may need to increase max_user to accomodate the new entry
     if (i >= max_user) {
@@ -1285,6 +1283,9 @@ void display_unclaimed(FILE * fp, bool verbose)
     user_t * u_owner;
 
     for (i = 0; i < max_onl_wc; i++) {
+        if (onl_wc[i].wc_macaddr[0] == '\0') {
+            continue;   
+        }
         if (find_user_wc_from_macaddr(onl_wc[i].wc_macaddr, &u_owner) == NULL) {
             display_unclaimed_wc(fp, i, verbose);
         }
