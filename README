@@ -50,15 +50,14 @@ TABLE OF CONTENTS
 INTRODUCTION
 ================================================
 
-The key requirements are:
+The primary requirements are:
 - view multiple webcams simultaneously
 - view live and recorded data
 - viewer program communicates directly to webcam servers
 - viewer program runs on either Linux or Android
-- develop in C language
 
-There may be useful sample code in what I have developed. I am posting this so you 
-can try out this webcam software, or use this as sample code in your project.
+I am posting this so you can try out or improve this webcam software, 
+or use portions as sample code in your projects.
 
 Examples of the following can be found in this project:
 - Simple DirectMedia Layer (SDL) graphics, fonts, and audio
@@ -92,8 +91,7 @@ of android-project/jni.
 LICENSE      
 ================================================
 
-The MIT License is used for the code that I have developed. I obtained a 
-copy of the MIT License from http://choosealicense.com/licenses/.
+Refer to http://choosealicense.com/licenses/. I chose the MIT License.
 
 The MIT License is "A permissive license that is short and to the point. 
 It lets people do anything with your code with proper attribution and 
@@ -599,7 +597,7 @@ Refer to file wc_webcam.c ...
 
 The recorded webcam data frames are stored in file rp.dat. This is a circular file. If this
 file doesn't exist then the size available for this file is determined, and the file
-is then created and storage is preallocated.
+is created and storage preallocated.
 
 The size allocated to rp.dat file is the amount of space available in the filesystem minus 
 100 MB. The size of the rp.dat file is limitted to maximum of 100 GB. For example, on 
@@ -804,7 +802,7 @@ BUILD ON LINUX
 
 I use Fedora 20 on a Dell Inspiron Desktop, a 64 bit Intel Core i3 processors. 
 
-I have only tested with the Logitech C300 1.3-MP Webcam. Some adjustments to 
+I have only tested with the Logitech C300 1.3-MP Webcam. Some code changes to 
 cam_init_webcam() may be needed to work with other webcams.
 
 Procedure:
