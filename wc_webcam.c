@@ -1039,7 +1039,7 @@ void * cam_thread(void * cx)
                     free(new_frame_array[i]);
                     new_frame_array[i] = NULL;
                 }
-                pfa_idx = FRAME_COMPARE_INTERVAL-1;
+                pfa_idx = 0;
 
                 free(curr_gs);
                 curr_gs = recvd_gs;
@@ -1071,8 +1071,10 @@ void * cam_thread(void * cx)
 
         // if there are frames in the proc_frame_array then add the oldest to the proc_frame_list
         if (pfa_idx < FRAME_COMPARE_INTERVAL) {
-            TAILQ_INSERT_TAIL(&proc_frame_list, proc_frame_array[pfa_idx], entries);
-            proc_frame_array[pfa_idx] = NULL;
+            if (proc_frame_array[pfa_idx] != NULL) {
+                TAILQ_INSERT_TAIL(&proc_frame_list, proc_frame_array[pfa_idx], entries);
+                proc_frame_array[pfa_idx] = NULL;
+            }
             pfa_idx++;
         }
 
