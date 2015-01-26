@@ -1,0 +1,1480 @@
+
+Title:  Webcam Project
+
+Author: Steven Haid
+Email:  stevenhaid@gmail.com
+Date:   January 25, 2015
+
+================================================
+TABLE OF CONTENTS
+================================================
+
+- INTRODUCTION
+- ACKNOWLEDGMENTS
+- LICENSE      
+- REFERENCES
+- USAGE
+   . admin command
+   . viewer command
+   . loginwc command
+   . nettest_to_admin_server and nettest_to_wc commands
+- DESIGN
+   . Peer To Peer Connection
+   . Peer To Peer Connection Via Proxy Server
+   . Peer To Peer Connection On Same Network
+   . admin_server program
+   . wc_server program
+   . viewer program
+   . source code files
+   . future work
+- BUILD ON LINUX
+- BUILD AND INSTALL WC_SERVER ON A RAPSBERRY PI
+- BUILD AND INSTALL ADMIN_SERVER
+- BUILD AND INSTALL VIEWER ON ANDROID DEVICE
+
+- APPENDIX A /etc/init.d/admin_server
+- APPENDIX B - ANDROID DEVELOPMENT
+   . INSTALL ANDROID DEVEL SDK
+   . INSTALL ANDROID DEVEL NDK
+   . BUILDING NDK APPS WITH CMD LINE
+   . NATIVE CPU ABI MANAGEMENT
+   . SDK VERSION
+   . NDK APP_PLATFORM
+   . SETTING UP MY SDL PROJECT
+   . RUNNING YOUR APP ON A DEVICE
+   . RUNNING YOUR APP ON THE EMULATOR
+   . ANDROID SDK CLI EXAMPLES
+   . ADB SHELL COMMAND EXAMPLES
+
+================================================
+INTRODUCTION
+================================================
+
+The key requirements are:
+- view multiple webcams simultaneously
+- view live and recorded data
+- viewer program communicates directly to webcam servers
+- viewer program runs on either Linux or Android
+- develop in C language
+
+There may be useful sample code in what I have developed. I am posting this so you 
+can try out this webcam software, or use this as sample code in your project.
+
+Examples of the following can be found in this project:
+- Simple DirectMedia Layer (SDL) graphics, fonts, and audio
+- Video For Linux Two
+- JPEG image decode
+- Establishing Peer-To-Peer connection using UDP Hole Punching
+- Implementing Reliable Connection using UDP
+- Simple Network Time Protocol (SNTP)
+- Pseudoterminals
+- Image Compare, motion detection
+- Building Android Apps
+
+================================================
+ACKNOWLEDGMENTS
+================================================
+
+The Android version of this project's 'viewer' program contains a copy of the 
+source code, of the following. This source code is located in subdirectories 
+of android-project/jni.
+
+- Simple Direct Media Layer (SDL)
+  http://www.libsdl.org/
+
+- The Independent JPEG Group's JPEG software, release 8d of 15-Jan-2012
+  www.ijg.org
+
+- Kenneth MacKay's getifaddrs() for Android
+  https://github.com/kmackay/android-ifaddrs/blob/master/ifaddrs.c
+
+================================================
+LICENSE      
+================================================
+
+The MIT License is used for the code that I have developed. I obtained a 
+copy of the MIT License from http://choosealicense.com/licenses/.
+
+The MIT License is "A permissive license that is short and to the point. 
+It lets people do anything with your code with proper attribution and 
+without warranty."
+
+   Copyright (c) 2015 Steven Haid  
+
+   Permission is hereby granted, free of charge, to any person obtaining a copy
+   of this software and associated documentation files (the "Software"), to deal
+   in the Software without restriction, including without limitation the rights
+   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+   copies of the Software, and to permit persons to whom the Software is
+   furnished to do so, subject to the following conditions:
+
+   The above copyright notice and this permission notice shall be included in all
+   copies or substantial portions of the Software.
+
+   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+   SOFTWARE.
+
+================================================
+REFERENCES
+================================================
+
+- http://www.rackspace.com/ 
+  The admin_server (described in following sections) runs on a Fedora 19 
+  Rackspace VM. The admin_server needs to run on a system with a public IP address.
+
+- http://dyn.com/dns/ 
+  Dyn DNS provides DNS name for the Rackspace system
+
+- https://getfedora.org/ 
+  Fedora 20 is my development system. Also the viewer program runs on Fedora20.
+
+- https://en.wikipedia.org/wiki/UDP_hole_punching
+  http://www.rapapaing.com/blog/?p=24
+  Direct Peer to Peer network connection uses UDP Hole Punching
+
+- http://linuxtv.org/downloads/v4l-dvb-apis/ 
+  Video for Linux Two API spec. This describes the IOCTLS used to read 
+  frames from /dev/video.
+
+- http://www.fourcc.org/yuv.php 
+  YUV Pixel Formats
+
+- http://www.libsdl.org/
+  http://www.libsdl.org/projects/SDL_mixer/
+  https://www.libsdl.org/projects/SDL_ttf/
+  Simple Direct Media Layer is a cross platform development library.
+  SDL supports Windows, Mac OS X, Linux, iOS, and Android.
+  SDL_mixer is for audio, SDL_ttf are fonts.
+
+- http://www.soundjay.com
+  Free Sound Effects
+
+- http://developer.android.com/sdk/index.html  
+  Android Developer Tools
+
+- https://wiki.libsdl.org/Android
+  Building SDL2 for Android.
+
+- https://wiki.libsdl.org/APIByCategory
+  SDL 2.0 API By Category
+
+- https://github.com/kmackay/android-ifaddrs/blob/master/ifaddrs.c
+  An implementation of getifaddrs() for Android, since the NDK 
+  does not natively support it.
+
+- https://tools.ietf.org/html/rfc4330  
+  Simple Network Time Protocol RFC
+
+- http://stackoverflow.com/  
+  Question and Answer Site for Programmers
+
+- http://raspberrypi.org/downloads
+  Raspberry Pi OS Images. I used Raspbian.
+
+- https://github.com/raspberrypi/linux/issues/618
+  USB patch for Raspberry PI, to improve Webcam reliability.
+
+- http://choosealicense.com/licenses/
+  Provides examples of software licenses.
+
+- https://refspecs.linuxfoundation.org/LSB_4.1.0/LSB-Desktop-generic/LSB-Desktop-generic/libjpegman.html
+  Interface Definitions for libjpeg. Also refer to /usr/share/doc/libjpeg-turbo-devel
+
+================================================
+USAGE
+================================================
+
+Here is an example network configuration:
+- The admin_server program is running on a host with a public IP 
+  address. I have an admin_server running on sthaid-rs.dyndns.org. 
+- The other programs are all running on hosts that are behind NAT Routers.
+  These programs could be all running behind the same NAT Router, or
+  (as shown below) behind different NAT Routers.
+- The wc_server (webcam server) each have a webcam device attached to
+  them. My configuration is that each wc_server is running on a Raspberry Pi.
+- The admin, viewer, and loginwc programs run on a Linux system. The viewer 
+  program can also run on an Android tablet.
+  
+                    admin_server
+                        |
+     --------------------------------------------------------  INTERNET
+             |                   |                   |
+         NAT Router          NAT Router           NAT Router
+             |                   |                   |
+        -----------      --------------------     ----------
+             |               |          |            |
+           admin,        wc_server   wc_server     wc_server 
+           viewer,
+           loginwc
+
+The following description assumes you are using the my admin server, which is running on
+sthaid-rs.dyndns.org. This admin server host name is hardcoded in wc.h.
+
+-------------
+admin command
+-------------
+
+The admin command allows you to administer your webcams. You can create your own 
+account, add webcams to your account, rename webcams, delete webcams, and set webcam
+access list. Webcams added to your account can be either the Raspberry Pi device running
+the webcam server program, or a link to another user's webcam.
+
+The admin command connects to the admin_server.  Once the connection is established, 
+the admin command passes user input text to the admin_server, and displays output text 
+received from the admin_server.
+
+Usage tutorial:
+
+If you want to create your own account: 
+    $ admin -c -u <username> -p <password>'
+or you can start by using the existing demo account as shown below.
+
+Verify access to admin_server by running the admin program (username=demo, password=demo).
+    $ admin -u demo -p demo
+    demo> help
+      ....
+
+The 'ls' command shows webcam 'st_backyard' has been created for user 'demo'. This webcam
+is 'online', and is a link to the actual webcam 'steve.backyard'.
+    demo> ls
+    st_backyard  demo         online  steve.backyard
+
+The 'ls everyone' command displays all users and their webcams. Note that user steve has
+a webcam named 'backyard', which is 'online', it's macaddr is '80:1f:02:ee:46:c9', and
+access is granted to 'everyone'. Instead of 'everyone', access could be granted to a 
+comma separated list of users, for example 'demo,bill,sally'
+    demo> ls everyone
+    USER: steve
+    computer     steve        online  80:1f:02:d3:9f:0c                      
+    backyard     steve        online  80:1f:02:ee:46:c9 everyone             
+    dining       steve        online  80:1f:02:d3:9f:0b                      
+    USER: demo
+    st_backyard  demo         online  steve.backyard
+
+To exit admin use 'exit', or ^d.
+    demo> exit
+
+Suppose you have brought up a new Raspberry Pi webcam server. The admin command 
+'ls unclaimed' lists webcams that do not have an owner, yours should be listed. You 
+can then add this webcam to your account.
+    $ admin -c -u sally -p sally_passwd
+    account sally created
+    Terminated
+
+    $ admin -u sally -p sally_passwd
+    sally> ls unclaimed
+    ---          ---          online  80:1f:02:d3:9f:0a                      
+    sally> add_wc basement 80:1f:02:d3:9f:0a
+    sally> ls
+    basement     sally        online  80:1f:02:d3:9f:0a                      
+    sally> exit
+
+Notes regarding username and password:
+- both the username and password must be between 2 and 32 characters, and
+  contain only letters, numbers, or '_'.
+- Some of the client programs (admin, loginwc, and nettest_to_wc) will attempt to get the 
+  username and password from environment variables. If you have set these environment variables 
+  then you do not need to supply the username and password on the cmd line. For example:
+      $ export WC_USERNAME=sally
+      $ export WC_PASSWORD=sally_passwd
+      $ admin
+      sally> 
+
+--------------
+viewer command
+--------------
+
+The viewer program is designed to run on Linux, and on Android. The same source code,
+viewer.c, is used for both. Because of this, their are no command line arguments
+to viewer. 
+
+User controls viewer by clicking on blue text, or by clicking on a webcam image to make
+that image larger or smaller. When entering username and password keyboard input is also
+supported.
+
+The viewer can display images from up to 4 webcams simultaneously. Viewer operates in either
+LIVE or PLAYBACK mode. 
+
+There is a Configuration Submode (CONFIG) which is used to set the username and password, 
+and other options.  The CONFIG submode provides the following:
+    SERVER CONFIG:
+    a) Set Username and Password
+    b) Server Check: This validates ability to connect and login to the admin_server, If okay
+       then a list of this user's webcam names is downloaded from the admin_server.
+    NETWORK CONFIG:
+    a) Set Proxy: The current state of Proxy is displayed. PROXY DISABLED means that the viewer
+       establishes a direct connection to each of the Raspberry Pi Webcam Servers. PROXY ENABLED
+       means that the image data being sent from the Raspberry Pi to the Viewer goes through the
+       admin_server on sthaid-rs.dyndns.org. PROXY ENABLED uses TCP on HTTP port 80, this allows
+       the viewer to be run behind some firewalls.
+    TIME CONFIG:
+    a) Select Localtime/GMT: The current time display mode is displayed. 
+    b) The 'OFF=nnn MS' displays time correction that the viewer applies to the time supplied
+       by the Operating System. If your device does have NTP time synchronization enabled then
+       the nnn value displayed should be 0. Otherwise, the nnn displays the difference
+       between the correct time and the time that the OS provides. The correct time is 
+       determined by the viewer program via Simple Network Time Protocol (SNTP). The reason
+       for all this is that for the viewer to work correctly it needs an accurate time base; and
+       my Samsung Galaxy Tab4 does not have an option to automatically synchronize time.
+
+The viewer saves its current settings in file .viewer_config on both Linux and Android so that
+they do not need to be entered again on subsequent invocations.
+
+The viewer is preconfigured to login to the demo account, and display the st_backyard
+webcam. So, just run 'viewer' and you should see images from the 'backyard' webcam.
+
+----------------
+loginwc command
+----------------
+
+The loginwc command provides the ability to login to the Raspberry Pi. Using ssh is
+usually preferable; however loginwc can be used when ssh connections can not be established.
+
+Loginwc uses the same method to connect to the Raspberry Pis as does the viewer program.
+
+For example:
+    $ loginwc -u sally -p sally_passwd basement
+    raspberrypi login: pi
+    Password: 
+    Last login: Wed Jan 14 20:15:02 EST 2015 on pts/0
+    Linux raspberrypi 3.12.28+ #709 PREEMPT Mon Sep 8 15:28:00 BST 2014 armv6l
+    pi@raspberrypi ~ $ exit
+
+The -P option can be used to route the connection through the proxy server 
+(same as PROXY ENABLED in the viewer program described above).
+
+--------------------------------------------------
+nettest_to_admin_server and nettest_to_wc commands
+--------------------------------------------------
+
+These programs are used to help debug network issues.
+
+Nettest_to_admin_server usage example:
+    $ nettest_to_admin_server -u root -p xxxxxxxx
+    Starting network speed test to sthaid-rs.dyndns.org
+
+    ClientToServer    ServerToClient
+      (Mbit/Sec)        (Mbit/Sec)  
+             6                19
+                 ........
+             6                18
+        ------            ------
+           6.4              19.2
+
+Nettest_to_wc usage example:
+    $ nettest_to_wc -u sally -p sally_passwd basement
+    Starting network speed test, webcam basement
+    network data is being sent directly to the webcam.
+                                                    Peer  Peer  
+                Sent  Recvd Sent  Recvd Resnd RcvDp Resnd RcvDp 
+    Send  Recv  Data  Data  Ack   Ack   Data  Data  Data  Data  
+    Mb/S  Mb/S  Dgram Dgram Dgram Dgram Dgram Dgram Dgram Dgram 
+    recv
+    nettest recv datalen is now 100000
+    0.0  19.4     0 17410  3482     0     0     0     0     0
+    0.0  18.6     0 16807  3361     0     0     0     0     0
+    .....
+
+================================================
+DESIGN
+================================================
+
+The following programs comprise this project:
+
+Server Programs ...
+
+admin_server: The main purpose of this program is to assist in establishing
+direct peer-to-peer connection between the viewer and the wc_server. Users will
+create an account and add webcams to their account. The admin_server validates
+credentials supplied by the viewer client program before allowing the viewer to 
+connect to wc_server. This program also provides proxy service, to allow viewer 
+programs behind a firewall to connect to the wc_servers.
+
+wc_server: This program captures a stream of JPEG images (Motion JPEG) from a
+webcam and sends this stream (in 'live' mode) to connected client viewer programs.
+This program also records the JPEG images in a circular file (rp.dat), and will
+send the recorded images to the viewer client when in 'playback' mode.
+
+Client Programs ...
+
+viewer: This programs provides for simultaneous viewing of up to 4 webcams. This
+program connects to the wc_server(s) and receives and displays a series of JPEG
+images. Control interface is provided to select 'live' vs 'playback' mode; and when
+in 'playback' mode to control the speed, direction, and time of playback.
+
+admin: This is a simple client program that sends and receives text to the admin_server.
+This program is used to create and administer the user accounts.
+
+loginwc: This is another simple client program that sends and receives text to the
+wc_server login process. This program provides login access to wc_server, including in
+cases where ssh is not be able to connect.
+
+nettest_to_admin_server: This program is a network speed test to the admin_server, using
+TCP. Root access to admin_server is required. This program helps debug network problems.
+
+nettest_to_wc: This program is a network speed test to a wc_server; also used to
+help debug network problems.
+
+-----------------------
+Peer To Peer Connection
+-----------------------
+
+Direct Peer-To-Peer connections are established using UDP Hole Punching. Refer to 
+http://en.wikipedia.org/wiki/UDP_hole_punching. A reliable connection is established
+by techniques similar to TCP, such as resending UDP packets that are not acknowledged
+as being received.
+
+Refer to the following diagram, these are the steps to establish a connection from
+the viewer program to wc_server program.
+
+                    admin_server
+                        |
+     ------------------------------------------------  INTERNET
+            |                               |
+        NAT Router                      NAT Router
+            |                               |
+        -----------                     ------------
+            |                               |
+         wc_server                        viewer
+                  
+- Wc_server periodically sends DGRAM_ID_WC_ANNOUNCE to admin_server, 
+  so that the admin_server knows that the wc_server is alive, and knows its
+  netowrk address.
+
+- When viewer wants to connect to wc_server, the viewer sends DGRAM_ID_CONNECT_REQUEST
+  to admin_server. This request packet includes the username, password, and webcam name.
+
+- The admin_server validates that the user is permitted access to the specified webcam,
+  and sends the DGRAM_ID_CONNECT_ACTIVATE to both the wc_server and the viewer. The
+  DGRAM_ID_CONNECT_ACTIVATE informs the wc_server and the viewer of the NAT Router
+  address of the peer.
+
+- Both the wc_server and viewer both start sending DGRAM_ID_P2P_CON_REQ to each other.
+  Some of these packets will initially not be allowed in by the NAT Routers, but 
+  eventually the NAT Router understands the packets to be valid and passes the 
+  received packets down to both the wc_server and viewer programs.
+
+- The viewer and wc_server respond with DGRAM_ID_P2P_CON_RESP so that the peer knows
+  the connection is established.
+
+- Once the connection is established, the DGRAM_ID_P2P_DATA and DGRAM_ID_P2P_ACK packets
+  are used to exchange data.
+
+The implementation is contained in the p2p1.c file.
+
+----------------------------------------
+Peer To Peer Connection Via Proxy Server
+----------------------------------------
+
+If the viewer is behind a firewall then the peer-to-peer connection described above
+does not work. The firewall does not let the UDP packets through. 
+
+Often firewalls will let TCP port 80 through, to provide access to the internet.
+
+To get around the firewall, the admin_server program provides a proxy service. These steps
+achieve the connection using the admin_server's proxy service:
+
+                    admin_server
+                        |
+     ------------------------------------------------  INTERNET
+            |                               |
+        NAT Router                       FIREWALL  
+            |                               |
+        -----------                     ------------
+            |                               |
+         wc_server                        viewer
+
+- User enables proxy mode in the viewer program.
+
+- Viewer program connects to admin_server, via TCP Port 80. The viewer
+  supplies the username, password, and webcam name to which a connection
+  is to be established.
+
+- The admin_server connects to the wc_server using the Peer-To-Peer 
+  algorithm described in the preceding section.
+
+- The connection data flows between the viewer and wc_server via the admin_server.
+
+The code to establish the port 80 TCP connection from viewer to admin_server is
+contained in p2p2.c.
+
+---------------------------------------
+Peer To Peer Connection On Same Network
+---------------------------------------
+
+Most of my work on this project was done with the wc_server and viewer programs
+all behind the same NAT Router, as shown below.
+
+                    admin_server
+                        |
+     ------------------------------------------------  INTERNET
+                    |       
+               NAT Router  
+                    |               
+        ---------------------------- 
+            |               |
+         wc_server        viewer
+
+This case is very similar to the "Peer-To-Peer Connection" case except that the
+admin_server provides the actual IP Address of the peer (not the NAT Router address)
+in the DGRAM_ID_CONNECT_ACTIVATE.
+
+--------------------
+admin_server program
+--------------------
+
+The admin_server program accepts TCP connections on port 80, using the standard
+socket, listen, accept API. An attempt is made to make the data appear to be HTTP
+by using HTTP connect request and response strings when the connection is first
+established. Following the HTTP connect/response handshake, the client sends a
+96 byte header which includes the username, password, and desired service. The
+processing for each service is:
+- create: Create a new user account, using the supplied username and password. 
+  An empty user data file is created in the user subdirectory on the system
+  on which the admin_server is running. Refer to typedef user_t for the structure
+  of this file. 
+- login: Login to an existing account. The following socket data are the text 
+  strings associated with this login session. Some of the commands, such as
+  'add_wc' will update the user data file.
+- command: This is similar to 'login', except that just a single command is
+  processed and then admin_server drops the connection. This is used by the 
+  viewer program, which executes the 'ls' command to get the list of webcams
+  owned by the user.
+- wccon: This is the peer-to-peer proxy server. This will establish a 
+  peer-to-peer connection (using p2p1.c) to the desired webcam, and pass the
+  data from the socket on this peer-to-peer connection. The viewer program can
+  use this by enabling proxy mode. This is useful when viewer is behind a 
+  firewall that blocks the datagrams used by the direct peer-to-peer connection.
+  The loginwc and nettest_to_wc programs can also use this proxy server, when the
+  '-P' option is provided.
+- nettest: Network speed test.
+
+The other function of admin_server is to support the establishment of direct 
+peer-to-peer connections. Refer to https://en.wikipedia.org/wiki/UDP_hole_punching,
+for a description of how the peer-to-peer connections work. The admin_server does
+the following:
+- Receives datagrams on the ADMIN_SERVER_DGRAM_PORT, port 9001. These datagrams
+  are either a DGRAM_ID_WC_ANNOUNCE or DGRAM_ID_CONNECT_REQ.
+- The DGRAM_ID_WC_ANNOUNCE is sent to admin_server periodically as a result of the wc_server's
+  call to p2p1_accept. The purpose of the DGRAM_ID_WC_ANNOUNCE is to inform the 
+  admin_server of the address the wc_server. The admin_server keeps track of
+  the addresses of all wc_servers (those that admin_server has received the
+  DGRAM_ID_WC_ANNOUNCE from) in the onl_wc table.
+- The DGRAM_ID_CONNECT_REQ is sent to admin_server when a program such as
+  viewer or loginwc wants to establish a peer-to-peer connection directly to
+  the wc_server. The admin_server will validate the username and password
+  that are contained in the DGRAM_ID_CONNECT_REQ, and will validate that the
+  user has permission to access the specified webcam. Once validated, the
+  admin_server will send the DGRAM_ID_CONNECT_ACTIVATE to both the program
+  that is requesting to establish the connection and to the wc_server. This
+  DGRAM_ID_CONNECT_ACTIVATE datagram contains the address of the 2 peers, and
+  thus allows the 2 peers to establish a direct connection to each other.
+
+------------------
+wc_server program
+------------------
+
+Referring to wc_main.c ...
+
+The wc_server program initialization calls service initialization routines. Only the
+webcam service provides an initialization routine. Refer to service_tbl[] in wc_main.c.
+
+The wc_server program accepts connections from clients by calling p2p_accept (using the
+p2p1 routines). The call to p2p_accept() returns which service the client is requesting.
+The supported services are:
+    SERVICE_WEBCAM  - webcam
+    SERVICE_SHELL   - login shell
+    SERVICE_NETTEST - network performance test
+The appropriate thread is created to handle the client's request.
+
+The remainder of this section will describe the SERVICE_WEBCAM service, the other 2
+services are relatively straightforward. 
+
+Refer to file wc_webcam.c ...
+
+The recorded webcam data frames are stored in file rp.dat. This is a circular file. If this
+file doesn't exist then the size available for this file is determined, and the file
+is then created and storage is preallocated.
+
+The size allocated to rp.dat file is the amount of space available in the filesystem minus 
+100 MB. The size of the rp.dat file is limitted to maximum of 100 GB. For example, on 
+my Raspberry Pi:
+    pi@raspberrypi ~/proj_cam $ ls -l rp.dat
+    -rw-r--r-- 1 pi pi 4694000000 Jan 21 07:58 rp.dat
+    pi@raspberrypi ~/proj_cam $ df -h .
+    Filesystem      Size  Used Avail Use% Mounted on
+    /dev/root       7.1G  6.7G  106M  99% /
+
+The rp.dat file header type is rp_file_hdr_t. The header contains information about the
+last frame written to the file, including the last_frame_file_offset, and last_frame_file_length.
+These are used when the wc_server program is restarted, to continue the recording at that
+location in the rp.dat file.
+
+The Webcam Service initialization is performed by call to wc_svc_webcam_init(), 
+which does the following:
+- Reads the configuration file (.wc_config), this file contains the webcam resolution.
+- Calls rp_init() - this initializes the record/playback feature. Rp_init: opens the
+  file which contains the recorded frame data (rp.dat), creates a thread to initialize the
+  table of contents, and creates a thread to write new image frame data to the rp.dat file.
+- Calls cam_init(). Cam_init creates the cam_thread. 
+
+These threads, that were created by wc_svc_webcam_init(), do the following:
+- rp_toc_init_thread() - Reads the entire rp.dat file and build an in-memory table
+  of contents; this table of contents contains the real_time and file_offset of 
+  each recorded frame. This thread terminates when it completes the TOC initialization.
+- rp_write_file_frame_thread() - Polls for the availability of a new frame 
+  (the new frame is made available by the cam_thread). When a new frame is available 
+  the rp_write_file_frame-thread writes the new frame to the rp.dat file.
+- cam_thread() - 
+   - Opens the webcam device (/dev/video0), and issues ioctls to configure the webcam device. 
+     The configuration settings includes issuing of the following ioctls:
+        VIDIOC_S_FMT - set MJPEG mode, and image width, height
+        VIDIOC_S_PARM  - set frame rate to 10 frames/sec
+        VIDIOC_REQBUFS, VIDIOC_QUERYBUF, VIDIOC_QBUF - use memory mapped frame buffers
+        VIDIOC_STREAMON - instruct device to start capturing frames
+   - The cam_thread then repeats doing the following:
+     - Gets a frame via ioctl VIDIOC_DQBUF.
+     - Every fifth frame, a frame is converted from JPEG to Gray Scale, and is compared
+       against the saved Gray Scale image of the last frame that was put on the proc_frame_list.
+       The proc_frame_list is a linked list of frames that need to be sent to the connected 
+       clients and written to the rp.dat file.
+     - If the frames are different then this new frame and the preceding 4 frames are put in the
+       proc_frame_array. The proc_frame_array is a staging area for frames that will be
+       added to the proc_frame_list.
+     - If there are frames in the proc_frame_array, they are put on the proc_frame_list.
+       They are put on the proc_frame_list at the same rate as frames are received, but 
+       delayed by one half second from the actual frame receive time. Thus the live image
+       displayed by the viewer is delayed by at least one half second.
+
+When the viewer program connects to wc_server, the code in wc_main.c will accept the 
+connection and create the wc_svc_webcam thread. The wc_svc_webcam thread does the following
+- Calls p2p_recv to receive a control message from the viewer program. The control
+  messages are:
+   - MSG_TYPE_CMD_SET_MODE: sets the mode to either MODE_LIVE or MODE_PLAYBACK; when 
+     mode is set to playback other fields in this message control the playback state.
+   - MSG_TYPE_CMD_LIVE_MODE_CHANGE_RES: change the webcam resolution; the config setting
+     for resolution is cycled between 0,1,2 and is written to the config file. The cam_thread
+     checks for a change to CONFIG_RESOLUTION, and if so will re-init the webcam device
+     at the new resolution. The resolutions are:
+        0 => 640 x 480
+        1 => 320 x 240
+        2 => 160 x 120
+   - MSG_TYPE_CMD_SET_MIN_SEND_INTVL_US: change the minimum frame interval. This is used by
+     viewer to adjust the frame rate based upon the pane size. Higher frame rates are used
+     for larger panes. The wc_svc_webcam thread will send the next frame only when the time
+     since the last frame was sent exceeds the min_send_intvl_us.
+- Once per second p2p_send is called to send the MSG_TYPE_STATUS message to the viewer.
+  The status message contains the following fields:
+   - version: major/minor version of the wc_server program
+   - cam_status: status of the webcam device; for example if you unplug the webcam then
+     this status will be STATUS_ERR_WC_DOES_NOT_EXIST
+   - rp_status: status of the recording function; for example this status is 
+     STATUS_ERR_SYSTEM_CLOCK_NOT_SET if the system time is not synchronized via NTP.
+   - rp_duration_us: the duration of data that has been recorded
+   - p2p_resend_cnt: the number of DGRAMS that have been resent by the peer-to-peer
+     software to the viewer program; packets are resent when the peer has not acknowledged 
+     it has received the packet within 1/2 sec (see TIME_RESEND_MS in p2p1.c).
+   - p2p_recvdup_cnt: the number of duplicate DGRAMS that have been received by the viewer
+- When in MODE_LIVE the live image frame data is sent to viewer in the MSG_TYPE_FRAME message.
+  The frame sent in this message is obtained from the proc_frame_list. If this thread has
+  a poor connection to the viewer then this thread can fall behind in the proc_frame_list;
+  this potential problem is handled by the cam_thread, which will remove frames that are
+  older than 2 seconds from the proc_frame_list. 
+- When in MODE_PLAYBACK the recorded image frame data is sent to the viewer in the
+  MSG_TYPE_FRAME message. The rp_read_frame_by_real_time_us() routine is used to read the
+  desired frame from rp.dat for a specified time. The rp_read_frame_by_real_time_us routine
+  returns the desired frame, and the interval over which this frame is valid. After a frame
+  is sent, the next frame is not read from rp.dat and is not sent to viewer until the
+  playback time becomes outside the interval over which the last frame sent is valid.
+
+--------------
+viewer program
+--------------
+
+Viewer program initialization includes
+- reading the configuration file .viewer_config; this file contains the saved
+  viewer settings including: username, password, and the names of the webcams
+  being displayed
+- calling the SDL init routines
+- creating the 4 webcam_thread() threads
+
+Upon completing initialization, the main thread is responsible for:
+- processing SDL mouse-button and window events
+- updating the global 'mode' variable based on these events; for example
+  setting mode.mode to MODE_LIVE or MODE_PLAYBACK
+- determining if there is a need to update the window, such as when a 
+  new image frame from any of the webcams is available
+- if there is a need to update the window then the entire window is redrawn
+
+Each of the 4 webcam_threads:
+- contains a connection state machine, with the following states
+    STATE_CONNECTING:       calling p2p_connect to establish the connection
+    STATE_CONNECTED:        p2p_connect succeeded
+    STATE_CONNECTING_ERROR: p2p_connect failed
+    STATE_CONNECTED_ERROR:  while in the connected state, an error occurred when
+                            either sending or received data from the webcam
+    STATE_FATAL_ERROR:      should never be in this state, indicates software bug
+- the STATE_CONNECTING state is reentered after 10 seconds in either the 
+  STATE_CONNECTING_ERROR or STATE_CONNECTED_ERROR states
+- when in STATE_CONNECTED:
+  - Check for change to the global 'mode' variable, if changed then send the new
+    mode to the webcam using the MSG_TYPE_CMD_SET_MODE message. The 'mode' indicates
+    whether in 'live' or 'playback' mode. When in 'playback' the mde also includes
+    playback state such as stop/pause/play, fwd/rev, and playback time. When the 
+    webcam received this message, it is responsible for sending the correct frames
+    at the proper time.
+  - If the main thread has set the change_resolution_request, then the 
+    MSG_TYPE_CMD_LIVE_MODE_CHANGE_RES is sent to the webcam.
+  - In order to limit the amount of frame data sent to the viewer from each webcam
+    a desired minimum frame intvl_us is determined based on the current window pane size
+    for this webcam (larger panes have lower interval). The 
+    MSG_TYPE_CMD_SET_MIN_SEND_INTVL_US is sent to the webcam to inform it of the 
+    minimum frame send interval. The webcam will only send a frame if the time since the 
+    last frame was sent exceeds the minimum frame sent interval.
+  - Frames messages are received from the webcam. The received frame data is in JPEG
+    format, it is converted to YUY2 pixel format by calling jpeg_decode. Once converted,
+    the image_change indicator is set to inform the main thread's display_handler that
+    a new webcam image is available for display.
+
+-----------------
+source code files
+-----------------
+
+Support Code:
+
+p2p1.c:        peer-to-peer connection via udp hole punching
+p2p2.c:        client proxy code for peer-to-peer connection
+util.c:        various utilities, including sntp_query which returns system clock offset
+jpeg_decode.c: decode jpeg formatted data to pixel format
+
+Webcam Server (wc_server):
+
+wc_main.c:    main(), accepts connections and creates threads to service the connection
+wc_webcam.c:  supports SERVICE_WEBCAM, providing live and recorded data to client
+wc_login.c:   supports SERVICE_SHELL, providing client login 
+wc_nettest.c: supports SERVICE_NETTEST, providing peer-to-peer connection speed test
+
+Admin Server (admin_server):
+
+admin_server.c: 
+
+Client Programs: (viewer, admin, loginwc, nettest_to_admin_server, and nettest_to_wc)
+
+viewer.c
+admin.c
+loginwc.c
+nettest_to_admin_server.c
+nettest_to_wc.c
+
+-----------
+future work
+-----------
+
+I have no plans at this time to do any further work on this.
+
+However, here are some ideas for future improvements:
+
+- Use a better Webcam
+  . use H264 instead of MJPEG
+  . capture audio too
+  . pan and tilt control
+  . zoom control
+
+- Improve wc_server so that multiple wc_server programs can be run on the same host. 
+  To accomplish this, a different method of allocating space for rp.dat would be 
+  needed, as well as a way to specify which /dev/videoN device is being used by each 
+  copy of wc_server.
+
+- Use a Web Browser instead of the viewer program.
+
+- Port viewer to IOS and Windows. 
+
+- Better Security
+  . encrypt images sent over network
+  . improve password protection, passwords should not be sent unencrypted
+
+================================================
+BUILD ON LINUX
+================================================
+
+I use Fedora 20 on a Dell Inspiron Desktop, a 64 bit Intel Core i3 processors. 
+
+I have only tested with the Logitech C300 1.3-MP Webcam. Some adjustments to 
+cam_init_webcam() may be needed to work with other webcams.
+
+Procedure:
+- download this software to ~/proj_cam (or another directory you choose)
+- install additional packages
+    yum install SDL2-devel SDL2_ttf-devel SDL2-mixer-devel
+    yum install libjpeg-turbo-devel
+    yum install readline-devel
+- build the software
+    cd ~/proj_cam
+    make
+
+The following programs should have been built as a result of running make:
+  admin
+  admin_server
+  loginwc
+  nettest_to_admin_server
+  nettest_to_wc
+  viewer
+  wc_server
+
+I currently provide an admin_server running on sthaid-rs.dyndns.org.
+The software you just built will use this admin_server.
+
+What you should be able to do now is:
+
+- run the admin program and log in as demo
+    $ admin -u demo -p demo
+    demo> ls
+    st_backyard  demo         online  steve.backyard
+    demo> exit
+
+- run the viewer program, it is pre-initialized to login as 
+  demo and display the st_backyard webcam
+    $ viewer
+
+- plugin your own webcam, preferably Logictech C300 because that is all I've tested
+  - verify /dev/video0 exists
+  - run wc_server in the background, and check wc_server.log for errors
+  - create an account and add your webcam to your account
+      $ admin -c -u myacct -p mypasswd
+      account myacct created
+      $ admin -u myacct -p mypasswd
+      myacct> ls unclaimed
+      ---          ---          online  90:48:9a:41:7b:41                      
+      myacct> add_wc mywebcam  90:48:9a:41:7b:41 
+      myacct> ls 
+      mywebcam     myacct       online  90:48:9a:41:7b:41                      
+      myacct> exit
+   - run viewer
+     . select CONFIG and set your username and password, 
+     . select <none> in one of the 4 panes, and select mywebcam
+
+================================================
+BUILD AND INSTALL WC_SERVER ON A RAPSBERRY PI
+================================================
+
+Instead of attaching the Webcam to your desktop computer, you can use a
+small low cost computer. I use the Raspberry Pi.
+
+I purchased the following in March 2014:
+- CanaKit Raspberry Pi (Model B) Complete Starter Kit
+- Logictech C300 Webcam
+- Edimax 150 Mbps Wireless 802.11bgn nano USB Adapter
+- EasyAcc US 5V 2A Universal Travel AC Micro USB Wall Charger Adapter
+
+The CanaKit does contain a power supply, however at the time I purchased
+this the CanaKit power supply was just 1A, I believed that a power adapter
+with more current capacity would be more reliable, which is why I purchased
+the 2A power adapter. FYI, the current CanaKit contains a Raspberry PI B+ and 
+a 2.5A power supply.
+
+I did not need to purchase a powered USB hub, the Logictech C300 and 
+Edimax Wireless USB adapter work fine receiving power from the Raspberry Pi.
+
+Procedure ...
+- Assemble and install your Raspberry Pi. 
+  I used the Raspbian OS image from raspberrypi.org/downloads.
+  - be able to ssh to the pi account
+  - check date, time, and tz are correct
+  - update pi account password, if desired
+
+- login to pi account and create ~/proj_cam
+
+- sudo vi /etc/rc.local, and add the following so that the wc_server
+  will automatically start when the Raspberry Pi is rebooted
+    # Start wc_server
+    if [ -x /home/pi/proj_cam/wc_server ]
+    then
+      su pi -c "cd /home/pi/proj_cam; ./wc_server </dev/null >/dev/null 2>&1 &"
+    fi
+
+- install additional development software
+  - sudo apt-get install libjpeg8-dev
+  - sudo apt-get install libreadline6-dev
+
+- apply usb patch
+  - see https://github.com/raspberrypi/linux/issues/618 for information
+  - add the following to /boot/cmdline.txt, and reboot
+      dwc_otg.fiq_fsm_enable=0
+  - this seems to fix a webcam failure that occurs when closing and reopening /dev/video0,
+    of course this may not be needed in future versions of the kernel. My kernel is (uname -a)
+    "Linux raspberrypi 3.12.28+ #709 PREEMPT Mon Sep 8 15:28:00 BST 2014 armv6l GNU/Linux"
+
+- back on your development system, run the shell script which will copy the source
+  code to your Raspberry Pi system, build, and start wc_server; I suggest adding your development
+  system's id_rsa.pub to authorized_keys on the raspberry pi
+  - cd ~/proj_cam
+  - bin/install_raspberry_pi
+
+- back on the Raspberry Pi, check ~/proj_cam/wc_server.log for errors.
+
+At this point, back on your development system, you should be able to add this webcam 
+to your account, and run the viewer. 
+
+================================================
+BUILD AND INSTALL ADMIN_SERVER
+================================================
+
+Currently I have admin_server running on sthaid-rs.dyndns.org. 
+You can use this if you want. 
+
+Or, if you want to run your own admin_server, read on ...
+
+- You will need to host it on a system with a public IP address. 
+
+- Modify ADMIN_SERVER_HOSTNAME in wc.h.
+
+- I use the script bin/install_admin_server to copy the admin_server source to 
+  the host and build and restart it.
+
+- Refer to "APPENDIX A /etc/init.d/admin_server" for sample init.d script.
+
+================================================
+BUILD AND INSTALL VIEWER ON ANDROID DEVICE
+================================================
+
+For additional information refer to:
+- APPENDIX B
+- SDL documentation in ~/proj_cam/android-project/jni/SDL2-2.0.3/README-android.
+
+The top level directory for Android build is ~/proj_cam/android-poject.
+
+SDL provides a template android-project, ~/proj_cam/android_project/jni/SDL2-2.0.3/android-project.
+This template is the basis for android-project directory used to build the viewer app.
+
+The jni (Java Native Interface) directory contains sub directories for the 
+viewer and the library source code. Each of these sub-directories is configured 
+to build a shared library.
+- jni/src               main viewer code
+- jni/SDL2-2.0.3:       graphics library
+- jni/SDL2_ttf-2.0.12:  font library
+- jni/SDL2_mixer-2.0.0: audio library
+- jni/jpeg8d:           jpeg image library
+
+The java shim is android-project/src/org/libsdl/app/SDLActivity.java. This 
+file defines the main SDLActivity class. I modified this file to add the required
+calls to System.loadLibrary:
+    System.loadLibrary("SDL2");
+    System.loadLibrary("SDL2_ttf");
+    System.loadLibrary("SDL2_mixer");
+    System.loadLibrary("myjpeg");
+    System.loadLibrary("main");
+The java shim loads these libraries and calls SDLActivity.nativeInit, which
+eventually calls main in viewer.c.
+
+Refer to APPENDIX B to load your Android SDK and NDK, and to enable 
+Developer Options on your Android device. You should read all of APPENDIX B, 
+and then follow the directions in the following APPENDIX B subsections.
+- INSTALL ANDROID DEVEL SDK
+- INSTALL ANDROID DEVEL NDK
+- RUNNING YOUR APP ON A DEVICE
+
+Scripts are provided in the android-project directory: do_build, do_install,
+do_logcat, etc. To build and install the viewer App, use the do_build and
+do_install scripts. To see the viewer app logging output, use do_logcat.
+
+================================================
+APPENDIX A /etc/init.d/admin_server
+================================================
+
+#!/bin/sh
+
+# chkconfig: 3 90 10
+
+# install instructions ...
+# 
+# create this file in /etc/init.d/admin_server
+# chkconfig --add admin_server
+# service admin_server start
+
+dir=/home/haid/proj_cam
+prog=admin_server
+retval=0
+
+start() {
+        if ps -f -C $prog | grep $dir >/dev/null 2>&1; then
+          echo Already running
+        else
+          echo "Starting $prog"
+          cd $dir
+          $dir/$prog </dev/null >/dev/null 2>&1 &
+        fi
+}
+
+stop() {
+        echo  "Stopping $prog"
+        killall $dir/$prog
+}
+
+case "$1" in
+        start)
+                start
+                ;;
+        stop)
+                stop
+                ;;
+        restart)
+                stop
+                start
+                ;;
+        status)
+                if ps -f -C $prog | grep $dir >/dev/null 2>&1; then
+                  echo Running
+                else
+                  echo Stopped
+                fi
+                ;;
+        *)
+                echo "Usage: $0 {start|stop|status}"
+                retval=1
+                ;;
+esac
+exit $retval
+
+================================================
+APPENDIX B - ANDROID DEVELOPMENT
+================================================
+
+This Appendix outlines the procedures I used to install the SDK, NDK, and
+to setup the android-project directory. This is done using command lines,
+the IDE is not used.
+
+My linux development system:
+ - 4 Core Intel(R) Core(TM) i3-4150 CPU @ 3.50GHz
+ - 8 GB memory
+ - 1 TB storage
+ - Wireless Internet
+ - Fedora release 20 (Heisenbug), 64bit
+
+My target Android device is
+ - Samsung Galaxy Tab4
+ - Android Version 4.4.2 (KitKat API Level 19)
+
+-------------------------
+INSTALL ANDROID DEVEL SDK
+-------------------------
+
+a) install java and ant
+  yum install java-1.7.0-openjdk-devel ant
+
+b) install 32 bit libraries
+  yum install glibc.i686 glibc-devel.i686 libstdc++.i686 zlib-devel.i686 ncurses-devel.i686 \
+              libX11-devel.i686 libXrender.i686 libXrandr.i686
+
+c) Download Eclipse ADT with the Android SDK for Linux
+  http://developer.android.com/sdk/index.html
+  cd ~
+  unzip ~/Downloads/adt-bundle-linux-x86_64-20140702.zip 
+  ln -s adt-bundle-linux-x86_64-20140702/sdk android-sdk
+
+d) Add the following to PATH
+  $HOME/android-sdk/tools
+  $HOME/android-sdk/platform-tools
+
+e) export ANDROID_HOME
+  export ANDROID_HOME=~/adt-bundle-linux-x86_64-20140702/sdk
+
+f) Update SDK
+  run "android sdk", and install the following
+  - Tools
+   . Android SDK Tools
+   . Android SDK Platform-tools
+   . Android SDK Build-tools (highest version)
+  - Android 5.0 API 21
+   . SDK Platform
+   . ARM System Image   (probably optional, this is for the emulator)
+  - Extras
+   . Android Support Library
+
+-------------------------
+INSTALL ANDROID DEVEL NDK
+-------------------------
+
+a) download NDK and install, the install file is self extracting
+  http://developer.android.com/tools/sdk/ndk/index.htm
+     and download android-ndk-r10c-linux-x86_64.bin
+  cd ~
+  chmod 755 Download/android-ndk-r10c-linux-x86_64.bin
+  ./Downloads/android-ndk-r10c-linux-x86_64.bin
+  ln -s android-ndk-r10c android-ndk
+
+c) Add the following to PATH
+   $HOME/android-ndk
+
+note: earlier ndk versions are available, but there should not be a 
+need to use an earlier ndk  ...
+  . http://dl.google.com/android/ndk/android-ndk-r9-linux-x86_64.tar.bz2
+  . http://dl.google.com/android/ndk/android-ndk-r9d-linux-x86_64.tar.bz2
+  . etc
+
+-------------------------------
+BUILDING NDK APPS WITH CMD LINE
+-------------------------------
+
+Some of the following is copied from https://developer.android.com/tools/sdk/ndk/index.html.
+
+Here's the general outline of how you work with the NDK tools:
+
+- Place your native sources under <project>/jni/...
+
+- Create <project>/jni/Android.mk to describe your native sources to the NDK build system
+  Optional: Create <project>/jni/Application.mk.
+
+- Build your native code by running the 'ndk-build' script from your project's directory. 
+  It is located in the top-level NDK directory: 
+    . cd <project> 
+    . <ndk>/ndk-build
+  The build tools copy the stripped, shared libraries needed by your application 
+  to the proper location in the application's project directory.
+
+- Finally, compile your application using the SDK tools in the usual way. The SDK build tools will 
+  package the shared libraries in the application's deployable .apk file.
+
+- Summary:
+  One Time ...
+  . delete build.xml if it already exists
+  . android list targets
+  . android update project --target 1 --path .
+
+  Build
+  . ndk-build
+  . ant debug                               # -q for quiet
+  . adb install -r bin/HelloJni-debug.apk   # or 'ant install'
+
+-------------------------
+NATIVE CPU ABI MANAGEMENT
+-------------------------
+
+The CPU ABI is the instruction set of the device that the App is being run on.
+Refer to http://www.kandroid.org/ndk/docs/CPU-ARCH-ABIS.html.
+
+To determine the ABI(s) supported by your device ...
+    $ adb shell getprop | grep abi
+    [ro.product.cpu.abi2]: [armeabi]
+    [ro.product.cpu.abi]: [armeabi-v7a]
+This indicates my device supports both the armeabi and armeabi-v7a.
+
+The ABI can be specified in jni/Application.mk, for example to build for armeabi
+place this in the jni/Application.mk file.
+  APP_ABI := armeabi 
+
+FYI - You can unzip the Android Application Package (APK) file and confirm that the
+shared libraries are built for armeabi
+  $ unzip -l bin/SDLActivity-debug.apk
+         ....
+     152752  01-24-2015 09:19   lib/armeabi/libmyjpeg.so
+     122648  01-24-2015 09:19   lib/armeabi/libmain.so
+     369896  01-24-2015 09:19   lib/armeabi/libSDL2_ttf.so
+     859404  01-24-2015 09:19   lib/armeabi/libSDL2.so
+      50312  01-24-2015 09:19   lib/armeabi/libSDL2_mixer.so
+         ....
+
+To build a fat APK, place the following in your jni/Application.mk
+  APP_ABI := all 
+In this case, the unzip of the APK file shows that libraries are built
+for the following ABIs: armeabi, armeabi-v7a, arm64-v8a, mips, mips64, x86, x86_64.
+
+The size of the fat APK file is 6.6M. The size of the APK file built just for the
+armeabi is 771K.
+
+-----------
+SDK VERSION
+-----------
+
+Refer to: http://developer.android.com/guide/topics/manifest/uses-sdk-element.html.
+
+Note that 'Sdk Version' and 'API Level' refer to the same thing.
+
+You can determine the API Level of your device by first finding the Android Version
+of your device. Go to Settings -> General -> About Device to find the Android Version.
+My device's Android Version is 4.4.2. Refer to the above link which shows that 
+Android Version 4.4 uses API Level 19, and it's Version Code is KitKat.  Notice that the
+Version Codes are in alphabetical order.
+
+Another way to determine the API Level of your device is:
+  $ adb shell getprop ro.build.version.sdk
+  19
+
+The AndroidManifest.xml contains 
+    <uses-sdk android:minSdkVersion="integer"
+              android:targetSdkVersion="integer"
+              android:maxSdkVersion="integer" />
+- If you don't specify minSdkVersion, it defaults to 1. 
+  You should always specify minSdkVersion.
+- If you don't specify targetSdkVersion, it defaults to minSdkVersion.
+- If you don't specify maxSdkVersion then the max version is unlimited. 
+  Specifying maxSdkVersion is not recommended.
+- Your App will not run on a device whose API Level is less than the
+  minSdkVersion or greater than the maxSdkVersion.
+- The targetSdkVersion is the version your code is built against. A device 
+  whose API Level is targetSdkVersion or higher should be able to run 
+  your App. For example, if you set targetSdkVersion to 12 your App should
+  be able to run on any device whose API Level is 12 or higher.
+
+My AndroidManifest.xml contains
+   <uses-sdk android:minSdkVersion="12" />
+Thus this App should run on any device which has API greater or equal to 12.
+
+----------------
+NDK APP_PLATFORM
+----------------
+
+The jni/Application.mk file should define APP_PLATFORM to be the same as
+minSdkVersion. For example, add the following to jni/Application.mk
+   APP_PLATFORM := android-12
+
+If the APP_PLATFORM is not set correctly you will probably see a warning 
+similar to what is shown below, and your App may not work properly.
+    Android NDK: WARNING: APP_PLATFORM android-21 is larger than 
+    android:minSdkVersion 12 in ./AndroidManifest.xml
+
+APP_PLATFORM is the version of the native headers and libraries that the NDK 
+will compile your native code with. The NDK include files available to your
+native code are located here (for APP_PLATFORM 12):
+    ~/android-ndk/platforms/android-12/arch-arm/usr/include/
+
+-------------------------
+SETTING UP MY SDL PROJECT
+-------------------------
+
+Note that this procedure builds SDL and JPEG as Shared Libraries. An alternate approach
+is to build Static Libraries. Building Static Libraries has the advantage that they
+can be incorporated into your NDK toolchain, and easily used on your future projects.
+
+Procedure used to setup my SDL Android project ...
+
+# download SDL2, SDL2_ttf and SDL2_mixer from
+  . http://www.libsdl.org/hg.php
+  . https://www.libsdl.org/projects/SDL_ttf
+  . http://www.libsdl.org/projects/SDL_mixer/
+
+# expand the SDL2, SDL2_ttf, and SDL2_mixer
+cd ~
+tar -xvf Downloads/SDL2-2.0.3.tar.gz
+tar -xvf Downloads/SDL2_ttf-2.0.12.tar.gz
+tar -xvf Downloads/SDL2_mixer-2.0.0.tar.gz
+
+# get copy of libjpeg source, and remove the git metadata
+cd ~
+git clone https://github.com/folecr/jpeg8d
+rm -rf jpeg8d/.git
+
+# copy the template android-project into proj_cam
+cd ~/proj_cam
+cp -r ~/SDL2-2.0.3/android-project/ .
+
+# move the SDL2, SDL2_ttf, SDL2_mixer and libjpeg source code directories to jni
+cd ~/proj_cam/android_project
+mv ~/SDL2-2.0.3       jni
+mv ~/SDL2_ttf-2.0.12  jni
+mv ~/SDL2_mixer-2.0.0 jni
+mv ~/jpeg8d           jni
+
+# update AndroidManifest
+cd ~/proj_cam/android_project
+vi AndroidManifest.xml
+  set android:minSdkVersion to 12, and
+  delete android:targetSdkVersion
+
+# build the armeabi for NDK platform android-12,
+# (where the android-12 platform is the same as the minSdkVersion
+#  specified in AndroidManifest.xml)
+cd ~/proj_cam/android_project/jni
+vi Application.mk
+  APP_ABI := armeabi
+  APP_PLATFORM := android-12
+
+# update java shim
+cd ~/proj_cam/android_project
+vi src/org/libsdl/app/SDLActivity.java
+  change the code starting with "// Load the .so", to
+    static {
+        System.loadLibrary("SDL2");
+        System.loadLibrary("SDL2_ttf");
+        System.loadLibrary("SDL2_mixer");
+        System.loadLibrary("myjpeg");
+        System.loadLibrary("main");
+    }
+
+# convert libjpeg from static to shared library 
+cd ~/proj_cam/android_project/jni/jpeg8d
+cp Android.mk Android_static.mk
+vi Android.mk
+  convert to shared library make
+
+# setup the jni/src directory
+cd ~/proj_cam/android_project/jni/src
+rm Android_static.mk
+ln -s ../../../viewer.c .
+ln -s ../../../p2p1.c .
+ln -s ../../../p2p2.c .
+ln -s ../../../util.c .
+ln -s ../../../jpeg_decode.c .
+ln -s ../../../wc.h .
+vi Android.mk, update as follows ...
+    SDL_PATH := ../SDL2-2.0.3
+    SDL_TTF_PATH := ../SDL2_ttf-2.0.12
+    SDL_MIXER_PATH := ../SDL2_mixer-2.0.0
+    JPEG_PATH := ../jpeg8d
+
+    LOCAL_CFLAGS += -DANDROID -fsigned-char
+
+    LOCAL_C_INCLUDES := $(LOCAL_PATH)/$(SDL_PATH)/include \
+                        $(LOCAL_PATH)/$(SDL_TTF_PATH) \
+                        $(LOCAL_PATH)/$(SDL_MIXER_PATH) \
+                        $(LOCAL_PATH)/$(JPEG_PATH)
+
+    LOCAL_SRC_FILES := $(SDL_PATH)/src/main/android/SDL_android_main.c \
+                       viewer.c p2p1.c p2p2.c util.c jpeg_decode.c ifaddrs.c
+    
+    LOCAL_SHARED_LIBRARIES := SDL2 SDL2_ttf SDL2_mixer myjpeg
+
+# remove and recreate build.xml
+cd ~/proj_cam/android_project
+rm build.xml
+android update project --target 1 --path .
+
+----------------------------
+RUNNING YOUR APP ON A DEVICE
+----------------------------
+
+Enable Developer Mode on your device
+- Settings > General > About Device: 
+  - Tap Build Number 7 times
+- Settings > Developer Options:
+  - Turn on Developer Options using the slider at the top;
+    note that it may already be turned on
+  - Enable USB Debugging
+- Plug in USB Cable, and when asked to Allow USB Debugging, select OK.
+
+--------------------------------
+RUNNING YOUR APP ON THE EMULATOR
+--------------------------------
+
+I've only used the emulator for a hello-world app. The emulator requires 
+substantial system resources. If you plan to use the emulator be sure your
+development system meets the minimum requirements. The emulator takes a long
+time to load, once loaded you can leave it running.
+
+I believe running your app on a device is the better approach.
+
+I used the following options for my android21 virtual device:
+  AVD Name:      android21
+  Device:        Nexus 
+  Target:        API Lvl 21
+  Keyboard:      yes
+  Skin:          Skin With Dynamic Hardware Controls
+  SD Card        16 MB
+  Use Host GPU:  Yes
+
+Run the emulator
+  emulator64-arm -avd android21 -scale 0.32
+
+Run App on Emulator
+ - adb install
+ - eclipse - run
+
+------------------------
+ANDROID SDK CLI EXAMPLES
+------------------------
+
+Install
+ - android sdk   # manages installed components
+
+Help
+ - android help
+
+Project
+ - android create project --target 1 --name MyFirstApp --path $HOME/workspace/MyFirstApp \
+                           --activity MainActivity --package com.example.myfirstapp
+
+Emulator
+ - android avd                                 # manage emulator
+ - emulator64-arm -avd android21 -scale 0.32   # runs the emulator
+ - android list avd                            # Lists existing Android Virtual Devices.
+ - android list targets                        # Lists available targets
+ - android update project --target 1 --path .  # update project (creates build.xml needed by ant)
+
+Android Debug Bridge
+ - adb  options
+    -d  : use usb device
+    -e  : use emulator
+
+  adb help
+  adb shell [<command>]
+  adb install -r  bin/HelloJni.apk       # install app, use -r to replace
+  adb uninstall com.example.hellojni     # remove package
+  adb logcat                     # view device log
+  adb push                       # file xfer, also pull and sync
+
+  killall adb
+
+Ant Build Tool (tool for building java based projects, also called Apache ant)
+  ant help
+  ant clean    # clean project
+  ant debug    # create debug build of project
+  ant release  # create release build of project 
+               # (note that release builds must be signed)
+
+--------------------------
+ADB SHELL COMMAND EXAMPLES
+--------------------------
+
+Start the shell using 'adb shell'.
+The available commands are in /system/bin on your Android device.
+
+The following is a sampling of some of the key commands.
+
+General Commands
+  ls, mkdir, rmdir, echo, cat, touch, ifconfig, df
+
+  top 
+    -m <max_procs>
+
+  ps 
+    -t show threads, comes up with threads in the list
+    -x shows time, user time and system time in seconds
+    -P show scheduling policy, either bg or fg are common
+    -p show priorities, niceness level
+    -c show CPU (may not be available prior to Android 4.x) involved
+    [pid] filter by PID if numeric, or…
+    [name] …filter by process name
+
+Logging
+  logcat -h
+  logcat                  # displays everything
+  logcat -s Watchdog:I    # displays log from Watchdog
+  logcat -s SDL/APP       # all from my SDL APP
+
+   Priorities are:
+       V    Verbose
+       D    Debug
+       I    Info
+       W    Warn
+       E    Error
+       F    Fatal
+       S    Silent (suppress all output)
+    for example "I" displays Info level and below (I,W,E,F)
+
+Networking
+  netcfg
+  ifconfig wlan0
+
+Device Properties
+  getprop ro.build.version.sdk
+  getprop ro.product.cpu.abi
+  getprop ro.product.cpu.abi2
+  getprop ro.product.device
+  getprop
+
+Proc Filesystem
+  cat /proc/<pid>/cmdline
