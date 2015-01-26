@@ -64,7 +64,9 @@ SOFTWARE.
 #endif
 
 #ifdef ANDROID
+#ifndef SOCK_CLOEXEC
 #define SOCK_CLOEXEC 0
+#endif
 #endif
 
 // -----------------  VERSION  ------------------------------------------------------

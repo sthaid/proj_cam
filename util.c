@@ -202,6 +202,7 @@ int connect_to_admin_server(char * user_name, char * password, char * service, i
     *connect_status = STATUS_INFO_OK;
     return sfd;
 }
+
 // -----------------  SOCKET UTILS  ---------------------------------------
 
 int getsockaddr(char * node, int port, int socktype, int protcol, struct sockaddr_in * ret_addr)

@@ -759,11 +759,11 @@ void display_handler(void)
             for (i = 0; i < MAX_MOUSE_EVENT; i++) {
                 if (MOUSE_AT_POS(event.mouse_event_pos[i])) {
                     if (i == MOUSE_EVENT_QUIT) {
-                        INFO("got event MOUSE_EVENT_QUIT\n");
+                        DEBUG("got event MOUSE_EVENT_QUIT\n");
                         event.quit_event = true;
                         event.quit_event_reason = QUIT_EVENT_REASON_MOUSE;
                     } else {
-                        INFO("got event MOUSE_EVENT %d\n", i);
+                        DEBUG("got event MOUSE_EVENT %d\n", i);
                         event.mouse_event = i;
                     }
                     PLAY_BUTTON_SOUND();
@@ -819,7 +819,7 @@ void display_handler(void)
             break; }
 
         case SDL_QUIT: {
-            INFO("got event SDL_QUIT\n");
+            DEBUG("got event SDL_QUIT\n");
             event.quit_event = true;
             event.quit_event_reason = QUIT_EVENT_REASON_SDL;
             PLAY_BUTTON_SOUND();
@@ -829,7 +829,7 @@ void display_handler(void)
             break; }
 
         default: {
-            INFO("got event %d - not supported\n", ev.type);
+            DEBUG("got event %d - not supported\n", ev.type);
             break; }
         }
 
