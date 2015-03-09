@@ -1,7 +1,7 @@
 #!/bin/bash
 
 user=haid
-host=sthaid-rs.dyndns.org
+host=sthaid-gcloud.dyndns.org
 
 echo
 echo "----------- INSTALL_ADMIN_SERVER ----------"
@@ -14,7 +14,7 @@ scp -p \
 
 echo
 echo STOP ADMIN_SERVER 
-ssh $user@$host sudo service admin_server stop
+ssh -t $user@$host sudo service admin_server stop
 
 echo 
 echo BUILD 
@@ -22,9 +22,9 @@ ssh $user@$host "cd proj_cam; make admin_server"
 
 echo
 echo START ADMIN_SERVER 
-ssh $user@$host sudo service admin_server start
+ssh -t $user@$host sudo service admin_server start
 
 echo
 echo STATUS ADMIN_SERVER
-ssh $user@$host sudo service admin_server status
+ssh -t $user@$host sudo service admin_server status
 

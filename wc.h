@@ -95,7 +95,7 @@ int config_write(char * config_path, config_t * config, int config_version);
 
 // -----------------  WC SERVER -----------------------------------------------------
 
-#define ADMIN_SERVER_HOSTNAME        "sthaid-rs.dyndns.org"
+#define ADMIN_SERVER_HOSTNAME        "sthaid-gcloud.dyndns.org"   
 
 #define ADMIN_SERVER_PORT             80
 #define ADMIN_SERVER_DGRAM_PORT       9001
@@ -112,7 +112,7 @@ int config_write(char * config_path, config_t * config, int config_version);
 #define MIN_USERNAME                  2
 #define MIN_PASSWORD                  2
 
-#define HTTP_CONNECT_REQ  "CONNECT " ADMIN_SERVER_HOSTNAME ":80 HTTP/1.0\r\n\r\n"
+#define HTTP_CONNECT_REQ  "CONNECT host.domain:80 HTTP/1.0\r\n\r\n"
 #define HTTP_CONNECT_RESP "HTTP/1.0 200 OK\r\n\r\n"
 
 int connect_to_admin_server(char * user_name, char * password, char * service, int * connect_status);

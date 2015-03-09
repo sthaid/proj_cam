@@ -194,7 +194,7 @@ USAGE
 
 Here is an example network configuration:
 - The admin_server program is running on a host with a public IP 
-  address. I have an admin_server running on sthaid-rs.dyndns.org. 
+  address. I have an admin_server running on sthaid-gcloud.dyndns.org. 
 - The other programs are all running on hosts that are behind NAT Routers.
   These programs could be all running behind the same NAT Router, or
   (as shown below) behind different NAT Routers.
@@ -216,7 +216,7 @@ Here is an example network configuration:
            loginwc
 
 The following description assumes you are using the my admin server, which 
-is running on sthaid-rs.dyndns.org. This admin server host name is hardcoded 
+is running on sthaid-gcloud.dyndns.org. This admin server host name is hardcoded 
 in wc.h.
 
 -------------
@@ -319,7 +319,7 @@ password, and other options.  The CONFIG submode provides the following:
        that the viewer establishes a direct connection to each of the Raspberry
        Pi Webcam Servers. PROXY ENABLED means that the image data being sent 
        from the Raspberry Pi to the Viewer goes through the admin_server on 
-       sthaid-rs.dyndns.org. PROXY ENABLED uses TCP on HTTP port 80, this allows
+       sthaid-gcloud.dyndns.org. PROXY ENABLED uses TCP on HTTP port 80, this allows
        the viewer to be run behind some firewalls.
     TIME CONFIG:
     a) Select Localtime/GMT: The current time display mode is displayed. 
@@ -370,7 +370,7 @@ These programs are used to help debug network issues.
 
 Nettest_to_admin_server usage example:
     $ nettest_to_admin_server -u root -p xxxxxxxx
-    Starting network speed test to sthaid-rs.dyndns.org
+    Starting network speed test to sthaid-gcloud.dyndns.org
 
     ClientToServer    ServerToClient
       (Mbit/Sec)        (Mbit/Sec)  
@@ -869,7 +869,7 @@ The following programs should have been built as a result of running make:
   viewer
   wc_server
 
-I currently provide an admin_server running on sthaid-rs.dyndns.org.
+I currently provide an admin_server running on sthaid-gcloud.dyndns.org.
 The software you just built will use this admin_server.
 
 What you should be able to do now is:
@@ -970,7 +970,7 @@ this webcam to your account, and run the viewer.
 BUILD AND INSTALL ADMIN_SERVER
 ================================================
 
-Currently I have admin_server running on sthaid-rs.dyndns.org. 
+Currently I have admin_server running on sthaid-gcloud.dyndns.org. 
 You can use this if you want. 
 
 Or, if you want to run your own admin_server, read on ...
@@ -1054,7 +1054,8 @@ start() {
         else
           echo "Starting $prog"
           cd $dir
-          $dir/$prog </dev/null >/dev/null 2>&1 &
+          nohup $dir/$prog </dev/null >/dev/null 2>&1 &
+          sleep 1
         fi
 }
 
