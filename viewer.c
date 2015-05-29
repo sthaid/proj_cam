@@ -343,16 +343,16 @@ webcam_t         webcam[MAX_WEBCAM];
 event_t          event;
 
 char             config_path[MAX_STR];
-const int        config_version = 1;
+const int        config_version = 2;
 #if 0
-config_t         config[] = { { "username",  NO_USERNAME },
-                              { "password",  NO_PASSWORD },
+config_t         config[] = { { "username",  "steve"     },
+                              { "password",  "PASSWORD"  },
                               { "proxy",     "N"         },
                               { "localtime", "Y"         },
-                              { "wc_name_A", NO_WCNAME   },
-                              { "wc_name_B", NO_WCNAME   },
-                              { "wc_name_C", NO_WCNAME   },
-                              { "wc_name_D", NO_WCNAME   },
+                              { "wc_name_A", "computer"  },
+                              { "wc_name_B", "dining"    },
+                              { "wc_name_C", "basement"  },
+                              { "wc_name_D", "backyard"  },
                               { "zoom",      "N",        },
                               { "debug",     "N"         },
                               { "",          ""          } };

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 user=haid
-host=sthaid-gcloud.dyndns.org
+host=gc.sthaid.org
 
 echo
 echo "----------- INSTALL_ADMIN_SERVER ----------"

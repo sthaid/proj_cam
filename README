@@ -1250,8 +1250,8 @@ Note that 'Sdk Version' and 'API Level' refer to the same thing.
 
 You can determine the API Level of your device by first finding the Android 
 Version of your device. Go to Settings -> General -> About Device to find the 
-Android Version.  My device's Android Version is 4.4.2. Refer to the above l
-ink which shows that Android Version 4.4 uses API Level 19, and it's Version 
+Android Version.  My device's Android Version is 4.4.2. Refer to the above 
+link which shows that Android Version 4.4 uses API Level 19, and it's Version 
 Code is KitKat.  Notice that the Version Codes are in alphabetical order.
 
 Another way to determine the API Level of your device is:
@@ -1535,3 +1535,11 @@ Device Properties
 
 Proc Filesystem
   cat /proc/<pid>/cmdline
+
+Screen Capture and Record
+  adb shell screenrecord /sdcard/recording.mp4 
+  adb pull /sdcard/recording.mp4
+
+  adb shell screencap -p /sdcard/capture.png
+  adb pull /sdcard/capture.png
+
