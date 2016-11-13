@@ -1,0 +1,13 @@
+*.o
+admin
+admin_server
+android-project/bin/
+android-project/gen/
+android-project/libs/
+android-project/obj/
+loginwc
+nettest_to_admin_server
+nettest_to_wc
+viewer
+wc_server
+

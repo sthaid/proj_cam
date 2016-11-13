@@ -22,7 +22,6 @@ SOFTWARE.
 
 #include "wc.h"
 
-// XXX alphatize cmd_ls user list
 // XXX locking needed  
 
 //
@@ -51,17 +50,7 @@ SOFTWARE.
 
 typedef struct {
     char wc_name[MAX_WC_NAME+1];
-    bool is_owner;
-    union {
-        struct {
-            char wc_macaddr[MAX_WC_MACADDR+1];
-            char wc_access_list[MAX_WC_ACCESS_LIST+1];
-        } owner;
-        struct {
-            char user_name[MAX_USERNAME+1];
-            char wc_name[MAX_WC_NAME+1];
-        } link;
-    } u;
+    char wc_macaddr[MAX_WC_MACADDR+1];
 } user_wc_t;
 
 typedef struct {
@@ -104,11 +93,9 @@ void account_command(int sockfd, user_t * u);
 void cmd_processor(user_t * u, FILE * fp, bool single_cmd);
 bool cmd_help(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_add_wc(user_t * u, FILE * fp, int argc, char ** argv);
-bool cmd_ren_wc(user_t * u, FILE * fp, int argc, char ** argv);
+bool cmd_edit_wc(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_del_wc(user_t * u, FILE * fp, int argc, char ** argv);
-bool cmd_set_wc_access(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_ls(user_t * u, FILE * fp, int argc, char ** argv);
-bool cmd_password(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_delete_account(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_version(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_exit(user_t * u, FILE * fp, int argc, char ** argv);
@@ -128,12 +115,9 @@ user_t * find_user(char * user_name);
 user_wc_t * find_user_wc_from_user_and_name(user_t * u, char * wc_name);
 user_wc_t * find_user_wc_from_macaddr(char * wc_macaddr, user_t ** u);
 onl_wc_t * find_onl_wc_from_macaddr(char * wc_macaddr);
-user_wc_t * find_wc_owner_from_wc_link(user_wc_t * link_wc);
 bool verify_user_name_and_password(char * user_name, char *password, user_t ** u);
+bool verify_root_password(FILE * fp);
 bool verify_wc_macaddr(char * wc_macaddr);
-bool verify_wc_link(char * wc_link_str, char * link_user_name, char * link_wc_name);
-bool verify_wc_access_permitted(user_wc_t * wc, char * user_name);
-bool verify_wc_access_list(char * wc_access_list, int * status);
 bool verify_user_name(char * user_name, int * status);
 bool verify_password(char * password, int * status);
 bool verify_wc_name(char * wc_name, int * status);
@@ -287,11 +271,11 @@ void * service_thread(void * cx)
     len = recv(sockfd, http_connect_req, sizeof(http_connect_req)-1, MSG_WAITALL);
     set_sock_opts(sockfd, -1, -1, -1, 0);
     if (len != sizeof(http_connect_req)-1) {
-        ERROR("reading http connect request, len=%d, %s\n", len, strerror(errno));
+        DEBUG("reading http connect request, len=%d, %s\n", len, strerror(errno));
         goto done;
     }
     if (strcmp(http_connect_req, HTTP_CONNECT_REQ) != 0) {
-        ERROR("invalid http connect request, '%s'\n", http_connect_req);
+        DEBUG("invalid http connect request, '%s'\n", http_connect_req);
         goto done;
     }
 
@@ -500,38 +484,30 @@ typedef struct {
     bool (*proc)(user_t * u, FILE * fp, int argc, char ** argv);
     int    min_expected_argc;
     int    max_expected_argc;
-    bool   root_cmd;
     char * description;
 } cmd_tbl_t;
 
 cmd_tbl_t cmd_tbl[] = {
-    // the following cmds are for all users
-    { "help", cmd_help, 0, 0, false,
+    { "help", cmd_help, 0, 0, 
       "help - display description of commands" },
-    { "add_wc", cmd_add_wc, 2, 3, false,
-      "add_wc <wc_name> <wc_macaddr|wc_link> [<access_list>] - add webcam" },
-    { "ren_wc", cmd_ren_wc, 2, 2, false,
-      "ren_wc <wc_name> <new_wc_name> - rename webcam" },
-    { "del_wc", cmd_del_wc, 1, 1, false,
+    { "add_wc", cmd_add_wc, 2, 2, 
+      "add_wc <wc_name> <wc_macaddr> - add webcam" },
+    { "edit_wc", cmd_edit_wc, 3, 3, 
+      "edit_wc <wc_name> <property:name|XXX> <new_value> - update specified property" },
+    { "del_wc", cmd_del_wc, 1, 1, 
       "del_wc <wc_name> - delete webcam" },
-    { "set_wc_access", cmd_set_wc_access, 1, 2, false,
-      "set_wc_access <wc_name> <access_list> - set list of users permitted access" },
-    { "ls", cmd_ls, 0, 2, false,
-      "ls [-v] [everyone|unclaimed|<user_name>] - list webcams" },
-    { "password", cmd_password, 2, 2, false,
-      "password <curr_passwd> <new_passwd> - change password" },
-    { "delete_account", cmd_delete_account, 0, 0, false,
-      "delete_account - deletes the current user account and logout" },
-    { "version", cmd_version, 0, 0, false,
-      "version - display program version" },
-    { "exit", cmd_exit, 0, 0, false,
-      "exit - logout" },
-
-    // the following cmds are root only
-    { "su", cmd_su, 1, 1, true,
-      "su <user> - switch user" },
-    { "set_password", cmd_set_password, 1, 1, true,
+    { "ls", cmd_ls, 0, 2, 
+      "ls [-v] [unclaimed|everyone|<user_name>] - displa webcam info" },
+    { "set_password", cmd_set_password, 1, 1, 
       "set_password <new_password> - set password" },
+    { "delete_account", cmd_delete_account, 0, 0, 
+      "delete_account - deletes the current user account and logout" },
+    { "version", cmd_version, 0, 0, 
+      "version - display program version" },
+    { "exit", cmd_exit, 0, 0, 
+      "exit - logout" },
+    { "su", cmd_su, 1, 1, 
+      "su <user> - switch user" },
             };
 
 #define MAX_CMD_TBL (sizeof(cmd_tbl) / sizeof(cmd_tbl[0]))
@@ -566,9 +542,7 @@ void cmd_processor(user_t * u, FILE * fp, bool single_cmd)
 
         // search cmd_tbl for matching cmd
         for (i = 0; i < MAX_CMD_TBL; i++) {
-            if ((strcmp(cmd_tbl[i].name, argv[0]) == 0) &&
-                (is_root || !cmd_tbl[i].root_cmd))
-            {
+            if (strcmp(cmd_tbl[i].name, argv[0]) == 0) {
                 break;
             }
         }
@@ -604,35 +578,25 @@ bool cmd_help(user_t * u, FILE * fp, int argc, char ** argv)
 
     // display help 
     for (i = 0; i < MAX_CMD_TBL; i++) {
-        if (is_root || !cmd_tbl[i].root_cmd) {
-            prcl(fp, "%s\n", cmd_tbl[i].description);
-        }
+        prcl(fp, "%s\n", cmd_tbl[i].description);
     }
 
     // return, no-logout
     return false;
 }
 
-// add_wc <wc_name> <wc_macaddr|wc_link> [<access_list>] - add webcam for this user
+// add_wc <wc_name> <wc_macaddr> - add webcam for this user
 bool cmd_add_wc(user_t * u, FILE * fp, int argc, char ** argv) 
 {
-    char      * wc_name        = argv[0];
-    char      * wc_access_list = (argc > 2 ? argv[2] : NULL);
+    char      * wc_name    = argv[0];
+    char      * wc_macaddr = argv[1];
     user_wc_t * wc;
     int         i, status;
-    char        link_user_name[MAX_USERNAME+1];
-    char        link_wc_name[MAX_WC_NAME+1];
 
     // argv[0] is the name of the webcam being added
-    // argv[1] is either the webcams macaddr or link to another user's webcam
-    //         - macaddr : "11:22:33:44:55:66"  (this user owns the webcam)
-    //         - link    : 'joe.garage'         (Joe owns this webcam)
-    // argv[2] is optional list of other users who can access, or 'everyone';
-    //         this is only valid when this user is the webcam's owner
-    //
-    // examples:
-    //   add_wc my_garage 11:22:33:44:55:66 joe
-    //   add_wc joes_garage joe.garage
+    // argv[1] is webcams macaddr, for example 11:22:33:44:55:66
+    // example:
+    //   add_wc my_garage 11:22:33:44:55:66 
     // 
 
     // verify the name of webcam being added
@@ -659,88 +623,46 @@ bool cmd_add_wc(user_t * u, FILE * fp, int argc, char ** argv)
     }
     wc = &u->wc[i];
 
-    // check if wc_macaddr is supplied
-    if (verify_wc_macaddr(argv[1])) {
-        char   * wc_macaddr = argv[1];
-        user_t * u_owner;
-
-        // convert macaddr to lowercase
-        for (i = 0; wc_macaddr[i] != '\0'; i++) {
-            if (wc_macaddr[i] >= 'A' && wc_macaddr[i] <= 'F') {
-                wc_macaddr[i] += ('a' - 'A');
-            }
-        }
-
-        // verify wc_macaddr is not in use by any user
-        if (find_user_wc_from_macaddr(wc_macaddr, &u_owner)) {
-            prcl(fp, "error: wc_macaddr %s already owned by user %s\n", 
-                 wc_macaddr, u_owner->user_name);
-            return false;
-        }
-
-        // if access list is supplied then verify format is 
-        // a comma seperated list of usernames
-        if (wc_access_list) {
-            if (verify_wc_access_list(wc_access_list, &status) == false) {
-                prcl(fp, "error: invalid access_list '%s', %s\n", 
-                     wc_access_list, status2str(status));
-                return false;
-            }
-        }
-
-        // add the webcam to this users wc table, and
-        // store change in file
-        bzero(wc, sizeof(user_wc_t));
-        strncpy(wc->wc_name, wc_name, MAX_WC_NAME);
-        wc->is_owner = true;
-        strncpy(wc->u.owner.wc_macaddr, wc_macaddr, MAX_WC_MACADDR);
-        strncpy(wc->u.owner.wc_access_list, wc_access_list ? wc_access_list : "", MAX_WC_ACCESS_LIST);
-        update_user_file(u);
-
-    // check if wc_link is supplied
-    } else if (verify_wc_link(argv[1], link_user_name, link_wc_name)) {
-        // error if wc_access_list is supplied
-        if (wc_access_list) {
-            prcl(fp, "error: access_list not allowed\n");
-            return false;
-        }
-
-        // add the webcam to this users wc table, and
-        // store change in file
-        bzero(wc, sizeof(user_wc_t));
-        strncpy(wc->wc_name, wc_name, MAX_WC_NAME);
-        wc->is_owner = false;
-        strncpy(wc->u.link.user_name, link_user_name, MAX_USERNAME);
-        strncpy(wc->u.link.wc_name, link_wc_name, MAX_WC_NAME);
-        update_user_file(u);
-
-    // argv[1] is not a macaddr or link
-    } else {
-        prcl(fp, "error: invalid macaddr or link\n");
+    // verify macaddr
+    if (!verify_wc_macaddr(argv[1])) {
+        prcl(fp, "error: invalid macaddr\n");
+        return false;
     }
+
+    // convert macaddr to lowercase
+    for (i = 0; wc_macaddr[i] != '\0'; i++) {
+        if (wc_macaddr[i] >= 'A' && wc_macaddr[i] <= 'F') {
+            wc_macaddr[i] += ('a' - 'A');
+        }
+    }
+
+    // verify wc_macaddr is not in use by any user
+    user_t * u_owner;
+    if (find_user_wc_from_macaddr(wc_macaddr, &u_owner)) {
+        prcl(fp, "error: wc_macaddr %s already owned by user %s\n", 
+             wc_macaddr, u_owner->user_name);
+        return false;
+    }
+
+    // add the webcam to this user wc table, and
+    // store change in file
+    bzero(wc, sizeof(user_wc_t));
+    strncpy(wc->wc_name, wc_name, MAX_WC_NAME);
+    strncpy(wc->wc_macaddr, wc_macaddr, MAX_WC_MACADDR);
+    update_user_file(u);
 
     // return, no-logout
     return false;
 }
 
-// ren_wc <wc_name> <new_wc_name> - rename webcam 
-bool cmd_ren_wc(user_t * u, FILE * fp, int argc, char ** argv) 
+// edit_wc XXX more later
+// edit_wc <wc_name> <property:name|XXX> <new_value> - update specified property
+bool cmd_edit_wc(user_t * u, FILE * fp, int argc, char ** argv) 
 {
-    char      * wc_name = argv[0];
-    char      * new_wc_name = argv[1];
+    char * wc_name   = argv[0];
+    char * property  = argv[1];
+    char * new_value = argv[2];
     user_wc_t * wc;
-    int         status;
-
-    // verify new_wc_name, and
-    // verify new_wc_name is not already in use
-    if (verify_wc_name(new_wc_name, &status) == false) {
-        prcl(fp, "error: invalid new name '%s', %s\n", new_wc_name, status2str(status));
-        return false;
-    }
-    if (find_user_wc_from_user_and_name(u,new_wc_name)) {
-        prcl(fp, "error: new_wc_name '%s' is already in use\n", new_wc_name);
-        return false;
-    }
 
     // find wc_name in this user wc tbl
     wc = find_user_wc_from_user_and_name(u,wc_name);
@@ -749,11 +671,30 @@ bool cmd_ren_wc(user_t * u, FILE * fp, int argc, char ** argv)
         return false;
     }
 
-    // replace with new name
-    strcpy(wc->wc_name, new_wc_name);
+    // update selected property
+    if (strcmp(property, "name") == 0) {
+        char * new_wc_name = new_value;
+        int    status;
 
-    // store change in file
-    update_user_file(u);
+        // verify new_wc_name, and
+        // verify new_wc_name is not already in use
+        if (verify_wc_name(new_wc_name, &status) == false) {
+            prcl(fp, "error: invalid new name '%s', %s\n", new_wc_name, status2str(status));
+            return false;
+        }
+        if (find_user_wc_from_user_and_name(u,new_wc_name)) {
+            prcl(fp, "error: new_wc_name '%s' is already in use\n", new_wc_name);
+            return false;
+        }
+
+        // replace with new name
+        strcpy(wc->wc_name, new_wc_name);
+
+        // store change in file
+        update_user_file(u);
+    } else {
+        prcl(fp, "error: invalid property '%s'\n", property);
+    }
 
     // return, no-logout
     return false;
@@ -782,41 +723,7 @@ bool cmd_del_wc(user_t * u, FILE * fp, int argc, char ** argv)
     return false;
 }
 
-// set_wc_access <wc_name> <access_list> - set list of users permitted access
-bool cmd_set_wc_access(user_t * u, FILE * fp, int argc, char ** argv) 
-{
-    char * wc_name = argv[0];
-    char * wc_access_list = (argc == 2 ? argv[1] : "");
-    user_wc_t * wc;
-    int status;
-
-    // find wc_name in this user wc tbl
-    wc = find_user_wc_from_user_and_name(u,wc_name);
-    if (wc == NULL) {
-        prcl(fp, "error: does not exist '%s'\n", wc_name);
-        return false;
-    }
-
-    // verify wc is_owner
-    if (!wc->is_owner) {
-        prcl(fp, "error: access list not allowed on wc link\n");
-        return false;
-    }
-
-    // verify access_list string is properly formatted
-    if (!verify_wc_access_list(wc_access_list, &status)) {
-        prcl(fp, "error: invalid access list '%s'\n", wc_access_list);
-        return false;
-    }
-
-    // set the new access list
-    strncpy(wc->u.owner.wc_access_list, wc_access_list, MAX_WC_ACCESS_LIST);
-
-    // return, no-logout
-    return false;
-}
-
-// ls [everyone|unclaimed|<user_name>] - list webcams
+// ls [-v] [unclaimed|everyone|<user_name>] - displa webcam info
 bool cmd_ls(user_t * u, FILE * fp, int argc, char ** argv) 
 {
     int i;
@@ -838,17 +745,24 @@ bool cmd_ls(user_t * u, FILE * fp, int argc, char ** argv)
 
     // if argc is zero then 
     //   display my account
-    // else if argv[0] = "everyone" then 
-    //   display all user names   
     // else if argv[0] = 'unclaimed' then
     //   display webcams that are online and not owned
+    // else if argv[0] = "everyone" then 
+    //   display all user names   
     // else
     //   otherwise display specified user
     // endif
 
     if (argc == 0) {
         display_user(fp,u,verbose);
+    } else if (strcmp(argv[0], "unclaimed") == 0) {
+        display_unclaimed(fp, verbose);
     } else if (strcmp(argv[0], "everyone") == 0) {
+        if (!is_root && !verify_root_password(fp)) {
+            prcl(fp, "error: invalid root password\n");
+            return false;
+        }
+
         for (i = 0; i < max_user; i++) {
             if (user[i].user_name[0] == '\0' || IS_ROOT(&user[i])) {
                 continue;
@@ -857,45 +771,22 @@ bool cmd_ls(user_t * u, FILE * fp, int argc, char ** argv)
             display_user(fp,&user[i],verbose);
             prcl(fp, "\n");
         }
-    } else if (strcmp(argv[0], "unclaimed") == 0) {
-        display_unclaimed(fp, verbose);
     } else {
+        if (!is_root && !verify_root_password(fp)) {
+            prcl(fp, "error: invalid root password\n");
+            return false;
+        }
+
         user_t * u = find_user(argv[0]);
         if (u == NULL) {
             prcl(fp, "error: user %s does not exist\n", argv[0]);
+            return false;
         }
+        prcl(fp, "USER: %s\n", u->user_name);
         display_user(fp, u, verbose);
     }
 
     // return, no-logout
-    return false;
-}
-
-// password <curr_passwd> <new_passwd> - change password
-bool cmd_password(user_t * u, FILE * fp, int argc, char ** argv) 
-{
-    char * curr_passwd = argv[0];
-    char * new_passwd = argv[1];
-    int    status;
-
-    // verify curr_password
-    if (strcmp(u->password, curr_passwd) != 0) {
-        prcl(fp, "error: current_password invalid\n");
-        return false;
-    }
-
-    // validate new_password
-    if (!verify_password(new_passwd, &status)) {
-        prcl(fp, "error: new_password invalid, %s\n", status2str(status));
-        return false;
-    }
-
-    // set new_password and write user file
-    strcpy(u->password, new_passwd);
-    update_user_file(u);
-
-    // return no-logout
-    prcl(fp, "password has been changed\n");
     return false;
 }
 
@@ -930,13 +821,18 @@ bool cmd_exit(user_t * u, FILE * fp, int argc, char ** argv)
     return true;
 }
 
-// -- the following commands can be executed only by root --
-
 // su <user> - switch user
 bool cmd_su(user_t * u, FILE * fp, int argc, char ** argv)
 {
-    char * user_name = argv[0];
+    char   * user_name = argv[0];
     user_t * new_u;
+    bool     orig_is_root = is_root;
+
+    // if this thread is not root then get root password
+    if (!is_root && !verify_root_password(fp)) {
+        prcl(fp, "error: invalid root password\n");
+        return false;
+    }
 
     // find the user
     new_u = find_user(user_name);
@@ -946,7 +842,9 @@ bool cmd_su(user_t * u, FILE * fp, int argc, char ** argv)
     }
 
     // recursively call cmd_processor, passing in the new user struct
+    is_root = true;
     cmd_processor(new_u, fp, false);
+    is_root = orig_is_root;
 
     // return, no-logout
     return false;
@@ -1198,8 +1096,7 @@ void display_user(FILE * fp, user_t * u, bool verbose)
 
 void display_user_wc(FILE * fp, user_t * u, int u_wc_idx, bool verbose)
 {
-    user_wc_t * caller_wc;
-    user_wc_t * owner_wc;
+    user_wc_t * wc;
     char      * state;
     char        verb_str[1000];
     char        online_wc_addr_str[100];
@@ -1207,69 +1104,42 @@ void display_user_wc(FILE * fp, user_t * u, int u_wc_idx, bool verbose)
     int         i;
 
     // init locals
-    caller_wc   = &u->wc[u_wc_idx];
+    wc          = &u->wc[u_wc_idx];
     state       = "unknown";
     verb_str[0] = '\0';
 
-    // if webcam is a link then 
-    //   follow the link to determine owner_wc;
-    //   if not found or access is not allowed then 
-    //     set state_str accordingly
-    //     set owner_wc to NULL
-    //   endif
-    // else
-    //   set owner_wc
-    // endif
-    if (!caller_wc->is_owner) {
-        owner_wc = find_wc_owner_from_wc_link(caller_wc);
-        if (owner_wc == NULL) {
-            state = "nodev";
-        } else if (!verify_wc_access_permitted(owner_wc, u->user_name)) {
-            state = "denied";
-            owner_wc = NULL;
-        } 
-    } else {
-        owner_wc = caller_wc;
-    }
-
-    // if owner_wc has been identified by the above code
-    //   search the onl_wc table to see if wc_macaddr is online, and 
-    //   set verb_str
-    // endif
-    if (owner_wc != NULL) {
-        for (i = 0; i < max_onl_wc; i++) {
-            if (onl_wc[i].wc_macaddr[0] != '\0' &&
-                strcmp(owner_wc->u.owner.wc_macaddr, onl_wc[i].wc_macaddr) == 0) 
-            {
-                state = "online";
-                sprintf(verb_str, "%d.%d %s %s",
-                        onl_wc[i].version.major, onl_wc[i].version.minor,
-                        sock_addr_to_str(online_wc_addr_str, sizeof(online_wc_addr_str), 
-                                         (struct sockaddr *)&onl_wc[i].wc_addr),
-                        sock_addr_to_str(online_wc_addr_behind_nat_str, sizeof(online_wc_addr_behind_nat_str), 
-                                         (struct sockaddr *)&onl_wc[i].wc_addr_behind_nat));
-                break;
-            }
-        }
-        if (i == max_onl_wc) {
-            state = "offline";
+    // search the onl_wc table to see if wc_macaddr is online, and 
+    // set verb_str
+    for (i = 0; i < max_onl_wc; i++) {
+        if (onl_wc[i].wc_macaddr[0] != '\0' &&
+            strcmp(wc->wc_macaddr, onl_wc[i].wc_macaddr) == 0) 
+        {
+            state = "online";
+            sprintf(verb_str, "%d.%d %s %s",
+                    onl_wc[i].version.major, onl_wc[i].version.minor,
+                    sock_addr_to_str(online_wc_addr_str, sizeof(online_wc_addr_str), 
+                                     (struct sockaddr *)&onl_wc[i].wc_addr),
+                    sock_addr_to_str(online_wc_addr_behind_nat_str, sizeof(online_wc_addr_behind_nat_str), 
+                                     (struct sockaddr *)&onl_wc[i].wc_addr_behind_nat));
+            break;
         }
     }
+    if (i == max_onl_wc) {
+        state = "offline";
+    }
 
-    // print - examples:
-    // - computer     steve        online  80:1f:02:d3:9f:0c bill,bob,joe,sally   1.3 73.218.14.230:36657 192.168.1.121:36657
-    // - joes_garage  steve        online  joe.garage                             1.3 73.218.14.230:36657 192.168.1.121:36657
+    // print - example:
+    // - kitchen      steve        online  80:1f:02:d3:9f:0c  1.3 73.218.14.230:36657 192.168.1.121:36657
     //   123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 
     char   str[1000];
     char * s = str;
-    s += sprintf(s, "%-12s %-12s %-7s ", caller_wc->wc_name, u->user_name, state);
-    if (caller_wc->is_owner) {
-        s += sprintf(s, "%-17s %-20s ", caller_wc->u.owner.wc_macaddr, caller_wc->u.owner.wc_access_list);
-    } else {
-        s += sprintf(s, "%s.%s", caller_wc->u.link.user_name, caller_wc->u.link.wc_name);
-    }
+    s += sprintf(s, "%-12s %-12s %-7s %-17s ", 
+                 wc->wc_name, 
+                 u->user_name, 
+                 state,
+                 wc->wc_macaddr);
     if (verbose) {
-        if (strlen(str) < 74) {
+        if (strlen(str) < 64) {
             s += sprintf(s, "%*s", (int)(74-strlen(str)), "");
         }
         s += sprintf(s, "%s", verb_str);
@@ -1377,8 +1247,7 @@ user_wc_t * find_user_wc_from_macaddr(char * wc_macaddr, user_t ** u)
         for (j = 0; j < MAX_USER_WC; j++) {
             user_wc_t * wc = &user[i].wc[j];
             if (wc->wc_name[0] != '\0' &&
-                wc->is_owner &&
-                strcmp(wc->u.owner.wc_macaddr, wc_macaddr) == 0) 
+                strcmp(wc->wc_macaddr, wc_macaddr) == 0) 
             {
                 *u = &user[i];
                 return &user[i].wc[j];
@@ -1413,40 +1282,6 @@ onl_wc_t * find_onl_wc_from_macaddr(char * wc_macaddr)
     return NULL;
 }
 
-// follow wc_link to obtain wc_owner
-user_wc_t * find_wc_owner_from_wc_link(user_wc_t * wc_link)
-{
-    user_t    * u = NULL;
-    user_wc_t * wc_owner = NULL;
-
-    // verify wc_link is truly a link
-    if (wc_link->is_owner) {
-        ERROR("wc_link is not a link\n");
-        return NULL;
-    }
-
-    // verify link user_name and link wc_name are not empty
-    if (wc_link->u.link.user_name[0] == '\0' || wc_link->u.link.wc_name[0] == '\0') {
-        ERROR("wc_link user_name or wc_name strings are empty\n");
-        return NULL;
-    }
-
-    // locate user
-    u = find_user(wc_link->u.link.user_name);
-    if (u == NULL) {
-        return NULL;
-    }
-
-    // locate webcam
-    wc_owner = find_user_wc_from_user_and_name(u, wc_link->u.link.wc_name);
-    if (wc_owner == NULL) {
-        return NULL;
-    }
-
-    // return wc_owner
-    return wc_owner;
-}
-
 // verify user_name exists and supplied password is correct
 bool verify_user_name_and_password(char * user_name, char *password, user_t ** u) 
 {
@@ -1476,6 +1311,27 @@ bool verify_user_name_and_password(char * user_name, char *password, user_t ** u
     return true;
 }
 
+bool verify_root_password(FILE * fp)
+{
+    char password[100];
+    int len;
+
+    // read the root password
+    prcl(fp, "enter root password: ");
+    if (fgets(password, sizeof(password), fp) == NULL) {
+        return false;
+    }
+
+    // remove newline char
+    len = strlen(password);
+    if (len > 0 && password[len-1] == '\n') {
+        password[len-1] = '\0';
+    }
+
+    // verify root password
+    return (strcmp(password, user[0].password) == 0);
+}
+
 // verify wc_macaddr string is correctly formatted macaddr
 bool verify_wc_macaddr(char * wc_macaddr)
 {
@@ -1501,100 +1357,6 @@ bool verify_wc_macaddr(char * wc_macaddr)
         }
     }
 
-    return true;
-}
-
-// verify wc_link_str is correctly formatted link "<link_user_name>.<link_wc_name>";
-// this does not verify the link_user_name and link_wc_name actually exist;
-// the link_user_name and link_wc_name are returned if validation okay
-bool verify_wc_link(char * wc_link_str, char * link_user_name, char * link_wc_name)
-{
-    char * user_name;
-    char * wc_name;
-    char * saveptr;
-    int    status;
-
-    // note: wc_link_str is passed to strtok, and is therefore modified
-
-    user_name = strtok_r(wc_link_str, ".", &saveptr);
-    wc_name  = strtok_r(NULL, "", &saveptr);
-
-    if (!verify_user_name(user_name, &status) || !verify_wc_name(wc_name, &status)) {
-        return false;
-    }
-
-    strcpy(link_user_name, user_name);
-    strcpy(link_wc_name, wc_name);
-    return true;
-}
-
-// verify wc_owner allows access for user_name
-bool verify_wc_access_permitted(user_wc_t * wc_owner, char * user_name)
-{
-    char * acl_user_name;
-    char * saveptr;
-    char   s[MAX_WC_ACCESS_LIST+1];
-    bool   first = true;
-
-    if (wc_owner->is_owner == false) {
-        ERROR("is_owner is false\n");
-        return false;
-    }
-
-    strncpy(s, wc_owner->u.owner.wc_access_list, MAX_WC_ACCESS_LIST);
-    s[MAX_WC_ACCESS_LIST] = '\0';
-
-    while (true) {
-        acl_user_name = strtok_r(first ? s : NULL, ",", &saveptr);
-        first = false;
-    
-        if (acl_user_name == NULL) {
-            break;
-        }
-
-        if (strcmp(acl_user_name, "everyone") == 0 ||
-            strcmp(acl_user_name, user_name) == 0)
-        {
-            return true;
-        }
-    }
-
-    return false;
-}
-
-// verify wc_access_list str is properly formatted,
-// for example "job,bob,bill,sally"
-bool verify_wc_access_list(char * wc_access_list, int * status)
-{
-    char s[MAX_WC_ACCESS_LIST+1];
-    char * user_name;
-    char * saveptr;
-    bool   first = true;
-
-    // wc_access_list  should be a comma seperated list, with 0 or more user_names,
-    // 'everyone' grants all users access,
-
-    if (strlen(wc_access_list) > MAX_WC_ACCESS_LIST) {
-        *status = STATUS_ERR_WC_ACCESS_LIST_LENGTH;
-        return false;
-    }
-
-    strcpy(s, wc_access_list);
-
-    while (true) {
-        user_name = strtok_r(first ? s : NULL, ",", &saveptr);
-        first = false;
-
-        if (user_name == NULL) {
-            break;
-        }
-
-        if (!verify_user_name(user_name, status)) {
-            return false;
-        }
-    }
-
-    *status = STATUS_INFO_OK;
     return true;
 }
 
@@ -1935,40 +1697,12 @@ void * dgram_thread(void * cx)
                 goto connect_reject;
             }
 
-            // if this user owns the webcam then
-            //   find wc_macaddr in the onl_wc table
-            // else
-            //   find wc owner by following the link
-            //   check access list
-            //   find wc_macaddr in the onl_wc table
-            // endif
-            if (wc->is_owner) {
-                onlwc = find_onl_wc_from_macaddr(wc->u.owner.wc_macaddr);
-                if (onlwc == NULL) {
-                    ERROR("wc '%s' webcam not online\n", dgram_rcv.u.connect_req.wc_name);
-                    status = STATUS_ERR_WC_NOT_ONLINE;
-                    goto connect_reject;
-                }
-            } else {
-                user_wc_t * wc_owner = find_wc_owner_from_wc_link(wc);
-                if (wc_owner == NULL) {
-                    ERROR("wc '%s' link invalid\n", dgram_rcv.u.connect_req.wc_name);
-                    status = STATUS_ERR_INVALID_LINK;
-                    goto connect_reject;
-                }
-
-                if (!verify_wc_access_permitted(wc_owner, u->user_name)) {
-                    ERROR("wc '%s' link permission denied\n", dgram_rcv.u.connect_req.wc_name);
-                    status = STATUS_ERR_ACCESS_DENIED;
-                    goto connect_reject;
-                }
-
-                onlwc = find_onl_wc_from_macaddr(wc_owner->u.owner.wc_macaddr);
-                if (onl_wc == NULL) {
-                    ERROR("wc '%s' link not online\n", dgram_rcv.u.connect_req.wc_name);
-                    status = STATUS_ERR_WC_NOT_ONLINE;
-                    goto connect_reject;
-                }
+            // find wc_macaddr in the onl_wc table
+            onlwc = find_onl_wc_from_macaddr(wc->wc_macaddr);
+            if (onlwc == NULL) {
+                ERROR("wc '%s' webcam not online\n", dgram_rcv.u.connect_req.wc_name);
+                status = STATUS_ERR_WC_NOT_ONLINE;
+                goto connect_reject;
             }
 
             // onlwc has been set to the webcam that is to be connected to the client

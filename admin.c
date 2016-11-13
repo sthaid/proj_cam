@@ -104,7 +104,7 @@ int main(int argc, char **argv)
 
     // verify user_name, password, and args
     if (help_mode || (user_name == NULL) || (password == NULL) || (argc-optind != 0)) {
-        PRINTF("usage: wc_admin\n");
+        PRINTF("usage: admin\n");
         PRINTF("  -c: create account\n");
         PRINTF("  -u <user_name>: override WC_USERNAME environment value\n");
         PRINTF("  -p <password>: override WC_PASSWORD environment value\n");
