@@ -286,6 +286,7 @@ typedef struct {
     char            image_res[MAX_STR];
     bool            image_display;
     bool            image_highlight;
+    int             image_temperature;
     uint8_t       * image;
     int             image_w;
     int             image_h;
@@ -1617,6 +1618,9 @@ void display_handler(void)
                 // copy the texture to the render target
                 SDL_RenderCopy(renderer, wc->texture, NULL, &wcimagepane[i]);
 
+                //XXX temper
+                INFO("XXX %d temperature = %d\n", i, wc->image_temperature);
+
                 // register for the zoom event
                 event.mouse_event_pos[MOUSE_EVENT_WC_ZOOM+i] = wcimagepane[i];
 
@@ -2006,7 +2010,7 @@ void * webcam_thread(void * cx)
 
     #define RESOLUTION_STR(w,h) ((w) == 640 ? "HI" : (w) == 320 ? "MED" : (w) == 160 ? "LOW" : "???")
 
-    #define DISPLAY_IMAGE(_image, _width, _height, _motion) \
+    #define DISPLAY_IMAGE(_image, _width, _height, _motion, _temperature) \
         do { \
             pthread_mutex_lock(&wc->image_mutex); \
             if (_motion) { \
@@ -2020,6 +2024,7 @@ void * webcam_thread(void * cx)
             wc->image = (_image); \
             wc->image_w = (_width); \
             wc->image_h = (_height); \
+            wc->image_temperature = (_temperature); \
             wc->image_display = true;  \
             wc->image_change++; \
             pthread_mutex_unlock(&wc->image_mutex); \
@@ -2381,7 +2386,7 @@ void * webcam_thread(void * cx)
                 // display the image
                 wc->frame_status = STATUS_INFO_OK;
                 last_frame_recv_time_us = microsec_timer();
-                DISPLAY_IMAGE(image, width, height, msg.u.mt_frame.motion);
+                DISPLAY_IMAGE(image, width, height, msg.u.mt_frame.motion, msg.u.mt_frame.temperature);
                 break;
 
             case MSG_TYPE_STATUS:

@@ -547,6 +547,7 @@ try_again:
         // construct the wc_announce dgram
         bzero(&dgram, sizeof(dgram));
         dgram.id = DGRAM_ID_WC_ANNOUNCE;
+// XXX
         strncpy(dgram.u.wc_announce.wc_macaddr, wc_macaddr, MAX_WC_MACADDR);
         ret = getsockname(sfd, (struct sockaddr *)&dgram.u.wc_announce.wc_addr_behind_nat, &addrlen);
         if (ret == -1) {

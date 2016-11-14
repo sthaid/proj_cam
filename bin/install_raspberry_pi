@@ -14,7 +14,7 @@ do
     echo
     echo SEND TAR FILE TO $host
     scp -p \
-      wc_main.c wc_nettest.c wc_login.c wc_webcam.c p2p1.c util.c jpeg_decode.c wc.h Makefile \
+      wc_main.c wc_nettest.c wc_login.c wc_webcam.c p2p1.c util.c jpeg_decode.c temper.c wc.h Makefile \
       pi@$host:proj_cam
 
     echo

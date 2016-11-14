@@ -110,6 +110,7 @@ typedef struct frame_s {
     uint32_t             ref_count;
     bool                 motion;
     uint64_t             time_us;
+    int32_t              temperature;
     TAILQ_ENTRY(frame_s) entries;
     int32_t              buff_len;
     uint8_t              buff[0];
@@ -132,8 +133,9 @@ typedef struct {
     uint32_t data_len;
     uint64_t real_time_us; 
     uint64_t prior_frame_file_offset;
+    int16_t  temperature;
     bool     motion;
-    uint8_t  reserved[3];
+    uint8_t  reserved[1];
     uint32_t checksum;
     uint8_t  data[0];
 } rp_frame_hdr_t;
@@ -206,7 +208,7 @@ int rp_write_file_hdr(void);
 int rp_read_frame_by_file_offset(uint64_t file_offset, rp_frame_hdr_t * rpfh, void ** data, uint32_t * status);
 int rp_read_frame_by_real_time_us(uint64_t real_time_us, rp_frame_hdr_t * rpfh, void ** data, 
         uint32_t * status, uint64_t * frame_start_real_time_us, uint64_t * frame_end_real_time_us);
-int rp_write_frame(uint64_t real_time_us, void * data, int32_t data_len, bool motion);
+int rp_write_frame(uint64_t real_time_us, void * data, int32_t data_len, bool motion, int32_t temperature);
 uint32_t rp_checksum(void * data, size_t len);
 
 // -----------------  INIT  -------------------------------------------------------------
@@ -232,10 +234,16 @@ int wc_svc_webcam_init(void)
         ERROR("rp_init failed\n");
     }
 
-    // initialize camera:
+    // initialize camera
     ret = cam_init();
     if (ret < 0) {
         ERROR("cam_init failed\n");
+    }
+
+    // initialize temperature monitor
+    ret = temper_init();
+    if (ret < 0) {
+        ERROR("temper_init failed\n");
     }
 
     // return success
@@ -246,7 +254,7 @@ int wc_svc_webcam_init(void)
 
 void * wc_svc_webcam(void * cx)
 {
-    #define SEND_MSG_FRAME(_data, _data_len, _motion, _real_time_us, _status) \
+    #define SEND_MSG_FRAME(_data, _data_len, _motion, _real_time_us, _status, _temperature) \
         ( { \
             int ret = 0; \
             webcam_msg_t msg; \
@@ -255,6 +263,7 @@ void * wc_svc_webcam(void * cx)
             msg.u.mt_frame.real_time_us = (_real_time_us); /* use zero in live mode */ \
             msg.u.mt_frame.data_len     = (_data_len); \
             msg.u.mt_frame.status       = (_status); \
+            msg.u.mt_frame.temperature  = (_temperature); \
             msg.u.mt_frame.motion       = (_motion); \
             if (p2p_send(handle, &msg, sizeof(webcam_msg_t)) < 0) { \
                 ERROR("p2p_send frame hdr failed\n"); \
@@ -429,7 +438,9 @@ void * wc_svc_webcam(void * cx)
             pthread_mutex_unlock(&proc_frame_list_mutex);
 
             // send the frame
-            if (SEND_MSG_FRAME(live_frame->buff, live_frame->buff_len, live_frame->motion, 0, STATUS_INFO_OK) < 0) {
+            if (SEND_MSG_FRAME(live_frame->buff, live_frame->buff_len, live_frame->motion, 0, STATUS_INFO_OK, 
+                               live_frame->temperature) < 0) 
+            {
                 goto done;
             }
 
@@ -466,7 +477,7 @@ void * wc_svc_webcam(void * cx)
                 }
 
                 // send the stop frame
-                if (SEND_MSG_FRAME(NULL, 0, false, 0, STATUS_INFO_STOPPED) < 0) {
+                if (SEND_MSG_FRAME(NULL, 0, false, 0, STATUS_INFO_STOPPED, INVALID_TEMPERATURE) < 0) {
                     goto done;
                 }
                 stop_frame_sent = true;
@@ -505,7 +516,7 @@ void * wc_svc_webcam(void * cx)
                 // send the frame
                 if (ret < 0) {
                     if (pause_frame_read_fail_time_us == 0) {
-                        if (SEND_MSG_FRAME(NULL, 0, false, frame_real_time_us, status) < 0) {
+                        if (SEND_MSG_FRAME(NULL, 0, false, frame_real_time_us, status, INVALID_TEMPERATURE) < 0) {
                             goto done;
                         }
                     }
@@ -513,7 +524,7 @@ void * wc_svc_webcam(void * cx)
                 } else {
                     motion = (rpfh.motion) && 
                              (frame_real_time_us - play_frame_start_real_time_us < 1000000);
-                    if (SEND_MSG_FRAME(data, rpfh.data_len, motion, frame_real_time_us, status) < 0) {
+                    if (SEND_MSG_FRAME(data, rpfh.data_len, motion, frame_real_time_us, status, rpfh.temperature) < 0) {
                         free(data);
                         goto done;
                     }
@@ -570,14 +581,14 @@ void * wc_svc_webcam(void * cx)
                 // send the frame
                 if (ret < 0) {
                     play_frame_read_fail_time_us = microsec_timer();
-                    if (SEND_MSG_FRAME(NULL, 0, false, frame_real_time_us, status) < 0) {
+                    if (SEND_MSG_FRAME(NULL, 0, false, frame_real_time_us, status, INVALID_TEMPERATURE) < 0) {
                         goto done;
                     }
                 } else {
                     play_frame_read_fail_time_us = 0;
                     motion = (rpfh.motion) && 
                              (frame_real_time_us - play_frame_start_real_time_us < 1000000);
-                    if (SEND_MSG_FRAME(data, rpfh.data_len, motion, frame_real_time_us, status) < 0) {
+                    if (SEND_MSG_FRAME(data, rpfh.data_len, motion, frame_real_time_us, status, rpfh.temperature) < 0) {
                         free(data);
                         goto done;
                     }
@@ -969,10 +980,11 @@ void * cam_thread(void * cx)
             cam_status = STATUS_ERR_FRAME_DATA_MEM_ALLOC;
             goto cam_failure;
         }
-        new_frame->ref_count = 0;
-        new_frame->motion    = false;
-        new_frame->time_us   = frame_time_us;
-        new_frame->buff_len  = buffer.bytesused;
+        new_frame->ref_count   = 0;
+        new_frame->motion      = false;
+        new_frame->time_us     = frame_time_us;
+        new_frame->temperature = temper_read();
+        new_frame->buff_len    = buffer.bytesused;
         memcpy(new_frame->buff, bufmap[buffer.index].addr, buffer.bytesused);
         new_frame_array[nfa_idx++] = new_frame;
         new_frame = NULL;
@@ -1500,7 +1512,7 @@ void * rp_write_file_frame_thread(void * cx)
                 INFO("writing gap frame  time=%s.%6.6d\n",
                      time2str(ts1, this_frame_real_time_us / 1000000, false),
                      (int)(this_frame_real_time_us % 1000000));
-                ret = rp_write_frame(this_frame_real_time_us, NULL, 0, false);
+                ret = rp_write_frame(this_frame_real_time_us, NULL, 0, false, INVALID_TEMPERATURE);
                 if (ret < 0) {
                     ERROR("failed to write gap frame\n");
                     goto error;
@@ -1559,7 +1571,8 @@ void * rp_write_file_frame_thread(void * cx)
             ret = rp_write_frame(this_frame_real_time_us, 
                                  record_frame->buff, 
                                  record_frame->buff_len,
-                                 record_frame->motion);
+                                 record_frame->motion,
+                                 record_frame->temperature);
             if (ret < 0) {
                 ERROR("failed to write frame\n");
                 goto error;
@@ -1921,7 +1934,7 @@ not_found:
     return -1;
 }
 
-int rp_write_frame(uint64_t real_time_us, void * data, int32_t data_len, bool motion)
+int rp_write_frame(uint64_t real_time_us, void * data, int32_t data_len, bool motion, int32_t temperature)
 {
     rp_frame_hdr_t  rpfh;
     struct iovec    iov[2];
@@ -1961,6 +1974,7 @@ int rp_write_frame(uint64_t real_time_us, void * data, int32_t data_len, bool mo
     rpfh.real_time_us            = real_time_us;
     rpfh.prior_frame_file_offset = rp_file_hdr.last_frame_file_offset;
     rpfh.motion                  = motion;
+    rpfh.temperature             = temperature;
     rpfh.checksum                = -rp_checksum(&rpfh, sizeof(rpfh)-4);
 
     // write frame header and image to file

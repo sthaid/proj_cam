@@ -1139,8 +1139,8 @@ void display_user_wc(FILE * fp, user_t * u, int u_wc_idx, bool verbose)
                  state,
                  wc->wc_macaddr);
     if (verbose) {
-        if (strlen(str) < 64) {
-            s += sprintf(s, "%*s", (int)(74-strlen(str)), "");
+        if (strlen(str) < 54) {
+            s += sprintf(s, "%*s", (int)(54-strlen(str)), "");
         }
         s += sprintf(s, "%s", verb_str);
     }

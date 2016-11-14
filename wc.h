@@ -223,7 +223,7 @@ typedef struct {
         struct {
             char user_name[MAX_USERNAME+1];
             char password[MAX_PASSWORD+1];
-           char wc_name[MAX_WC_NAME+1];
+            char wc_name[MAX_WC_NAME+1];
             int service;
             struct sockaddr_in client_addr_behind_nat;
             dgram_uid_t dgram_uid;
@@ -500,6 +500,7 @@ typedef struct {
             uint64_t real_time_us;
             uint32_t data_len;
             uint32_t status;
+            int32_t  temperature;
             bool     motion;
         } mt_frame;
         struct status_s {
@@ -634,6 +635,13 @@ typedef struct {
 
 int jpeg_decode(uint32_t cxid, uint32_t jpeg_decode_mode, uint8_t * jpeg, uint32_t jpeg_size,
                 uint8_t ** out_buf, uint32_t * width, uint32_t * height);
+
+// -----------------  TEMPERATURE MONITOR  -------------------------------------------
+
+#define INVALID_TEMPERATURE 999
+
+int temper_init(void);
+int temper_read(void);
 
 // -----------------  UTILS  ---------------------------------------------------------
 

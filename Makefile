@@ -6,7 +6,7 @@ CFLAGS = -c -g -O2 -pthread -fsigned-char -Wall
 SDLCFLAGS = $(shell sdl2-config --cflags)
 
 ADMIN_SERVER_OBJS            = admin_server.o p2p1.o util.o
-WC_SERVER_OBJS               = wc_main.o wc_nettest.o wc_login.o wc_webcam.o p2p1.o util.o jpeg_decode.o
+WC_SERVER_OBJS               = wc_main.o wc_nettest.o wc_login.o wc_webcam.o p2p1.o util.o jpeg_decode.o temper.o
 ADMIN_OBJS                   = admin.o p2p1.o util.o 
 VIEWER_OBJS                  = viewer.o p2p1.o p2p2.o util.o jpeg_decode.o
 LOGIN_OBJS                   = loginwc.o p2p1.o p2p2.o util.o
