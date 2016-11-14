@@ -46,8 +46,8 @@ typedef struct {
 //
 
 p2p_routines_t * p2p = &p2p1;
-char             wc_macaddr[MAX_WC_MACADDR+1];
-int              debug_mode;
+static char      wc_macaddr[MAX_WC_MACADDR+1];
+static int       debug_mode;
 
 //
 // prototypes
@@ -132,6 +132,12 @@ int main(int argc, char **argv)
     // init thread attribute for creating threads detached
     pthread_attr_init(&thread_attr);
     pthread_attr_setdetachstate(&thread_attr, PTHREAD_CREATE_DETACHED);
+
+    // initialize temperature monitor
+    ret = temper_init(wc_macaddr);
+    if (ret < 0) {
+        ERROR("temper_init failed\n");
+    }
 
     // init services
     for (i = 0; i < MAX_SERVICE_TBL; i++) {

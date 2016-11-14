@@ -192,6 +192,7 @@ extern p2p_routines_t * p2p;
 #define DGRAM_ID_P2P_DATA           1234000023
 #define DGRAM_ID_P2P_ACK            1234000024
 #define DGRAM_ID_P2P_STATS          1234000025
+#define DGRAM_ID_TEMPERATURE        1234000031
 
 #define DGRAM_ID_STR(x) \
     ((x) == DGRAM_ID_WC_ANNOUNCE      ? "DGRAM_ID_WC_ANNOUNCE"      : \
@@ -203,6 +204,7 @@ extern p2p_routines_t * p2p;
      (x) == DGRAM_ID_P2P_DATA         ? "DGRAM_ID_P2P_DATA"         : \
      (x) == DGRAM_ID_P2P_ACK          ? "DGRAM_ID_P2P_ACK"          : \
      (x) == DGRAM_ID_P2P_STATS        ? "DGRAM_ID_P2P_STATS"        : \
+     (x) == DGRAM_ID_TEMPERATURE      ? "DGRAM_ID_TEMPERATURE"      : \
                                         "DGRAM_ID_????")
 
 #pragma pack(push,1)
@@ -274,6 +276,11 @@ typedef struct {
             uint64_t max_data_dgram;
             char dgram_end;
         } p2p_stats;
+        struct {
+            int temperature;
+            char wc_macaddr[MAX_WC_MACADDR+1];
+            char dgram_end;
+        } temperature;
     } u;
 } dgram_t;
 #pragma pack(pop)
@@ -640,7 +647,7 @@ int jpeg_decode(uint32_t cxid, uint32_t jpeg_decode_mode, uint8_t * jpeg, uint32
 
 #define INVALID_TEMPERATURE 999
 
-int temper_init(void);
+int temper_init(char * wc_macaddr);
 int temper_read(void);
 
 // -----------------  UTILS  ---------------------------------------------------------

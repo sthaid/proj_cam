@@ -240,12 +240,6 @@ int wc_svc_webcam_init(void)
         ERROR("cam_init failed\n");
     }
 
-    // initialize temperature monitor
-    ret = temper_init();
-    if (ret < 0) {
-        ERROR("temper_init failed\n");
-    }
-
     // return success
     return 0;
 }

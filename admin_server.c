@@ -1767,6 +1767,16 @@ connect_reject:
                 }
             }
         } while (0);
+
+        // if dgram is TEMPERATURE (from webcam) then
+        // XXX
+        if (dgram_rcv.id == DGRAM_ID_TEMPERATURE) do {
+            char  s[100];
+            INFO("recv dgram %s from %s, temp=%d\n", 
+                DGRAM_ID_STR(dgram_rcv.id),
+                sock_addr_to_str(s,sizeof(s),(struct sockaddr*)&from_addr),
+                dgram_rcv.u.temperature.temperature);
+        } while (0);
     }
 
     return NULL;
