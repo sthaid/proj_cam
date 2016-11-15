@@ -23,7 +23,7 @@ admin_server: $(ADMIN_SERVER_OBJS)
 	$(CC) -pthread -lrt -o $@ $(ADMIN_SERVER_OBJS)
 
 wc_server: $(WC_SERVER_OBJS) 
-	$(CC) -pthread -lrt -ljpeg -lreadline -o $@ $(WC_SERVER_OBJS)
+	$(CC) -pthread -lrt -ljpeg -lreadline -lusb -lm -o $@ $(WC_SERVER_OBJS)
 
 admin: $(ADMIN_OBJS) 
 	$(CC) -pthread -lrt -lreadline -o $@ $(ADMIN_OBJS)
