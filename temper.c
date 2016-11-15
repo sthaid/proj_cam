@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2015 Steven Haid
+Copyright (c) 2016 Steven Haid
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
 // XXX clean up prints, and review
+// XXX try with a cable
 
 #include "wc.h"
 #include <usb.h>
@@ -266,7 +267,7 @@ static struct sockaddr_in get_admin_server_addr(void)
 #define INTERFACE1 0x00
 #define INTERFACE2 0x01
 
-#define CALIBRATION_DEG_F 0
+#define CALIBRATION_DEG_F (-7)
 
 // variables
 
@@ -463,8 +464,15 @@ static bool interrupt_read_temperatura(usb_dev_handle * dev, double *tempf)
         return false;
     }
 
-    x = (answer[3] & 0xFF) + (answer[2] << 8);
-    *tempf = (x * (125.0 / 32000.0)) * 1.8 + 32. + CALIBRATION_DEG_F;
+    x = ((unsigned char)(answer[2]) << 8) |
+        ((unsigned char)(answer[3])     );
+
+    DEBUG("hi=%2.2x lo=%2.2x combined=%4.4x\n",
+        (unsigned char)(answer[2]),
+        (unsigned char)(answer[3]),
+        x);
+
+    *tempf = (x / 256.0) * 1.8 + 32.0 + CALIBRATION_DEG_F;
 
     return true;
 }
