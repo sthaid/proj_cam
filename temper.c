@@ -119,7 +119,7 @@ static void * temper_send_value_to_admin_server_thread(void * cx)
         bzero(&dgram, sizeof(dgram));
         dgram.id = DGRAM_ID_TEMPERATURE;
         dgram.u.temperature.temperature = temperature;
-        strncpy(dgram.u.wc_announce.wc_macaddr, wc_macaddr, MAX_WC_MACADDR);
+        strncpy(dgram.u.temperature.wc_macaddr, wc_macaddr, MAX_WC_MACADDR);
         ret = sendto(sfd, &dgram, offsetof(dgram_t,u.temperature.dgram_end), 0,
                      (struct sockaddr *)&admin_server_addr, sizeof(admin_server_addr));
         if (ret != offsetof(dgram_t,u.temperature.dgram_end)) {
@@ -267,7 +267,7 @@ static struct sockaddr_in get_admin_server_addr(void)
 #define INTERFACE1 0x00
 #define INTERFACE2 0x01
 
-#define CALIBRATION_DEG_F (-7)
+#define CALIBRATION_DEG_F (-2)
 
 // variables
 

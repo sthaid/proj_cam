@@ -109,6 +109,7 @@ int config_write(char * config_path, config_t * config, int config_version);
 #define MAX_WC_MACADDR                32
 #define MAX_USERNAME                  32
 #define MAX_PASSWORD                  32
+#define MAX_PHONENUMBER               32
 #define MIN_USERNAME                  2
 #define MIN_PASSWORD                  2
 

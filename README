@@ -1,9 +1,10 @@
-
 Title:  Webcam Project
 
 Author: Steven Haid
 Email:  stevenhaid@gmail.com
 Date:   January 25, 2015
+
+Update: November 15, 2016    add temperature support
 
 ================================================
 TABLE OF CONTENTS
@@ -45,6 +46,7 @@ TABLE OF CONTENTS
    . RUNNING YOUR APP ON THE EMULATOR
    . ANDROID SDK CLI EXAMPLES
    . ADB SHELL COMMAND EXAMPLES
+- APPENDIX C - CONFIGURE SENDMAIL RELAY ON ADMIN_SERVER
 
 ================================================
 INTRODUCTION
@@ -1542,4 +1544,61 @@ Screen Capture and Record
 
   adb shell screencap -p /sdcard/capture.png
   adb pull /sdcard/capture.png
+
+================================================
+APPENDIX C - CONFIGURE SENDMAIL RELAY ON ADMIN_SERVER
+================================================
+
+The admin_server will receive temperature values from the webcam raspberry pis.
+If a temperature value is out of range then a text message alert is sent
+by admin_server.
+
+The text message is sent via the vtext.com sms via email provider. Here is a 
+list of providers:
+  Sprint    phonenumber@messaging.sprintpcs.com
+  Verizon   phonenumber@vtext.com
+  T-Mobile  phonenumber@tmomail.net
+  AT&T      phonenumber@txt.att.net
+
+The admin_server is running on a google cloud VM - gc.sthaid.org.
+This VM is running CentOS 7.0 OS.
+
+This VM is configured fro sendmail relay to gmail using the following 
+procedure ...
+
+References
+   https://linuxconfig.org/configuring-gmail-as-sendmail-email-relay
+   https://hub.docker.com/r/sthaid/mediawiki-plus/
+
+Install packages, may need others:
+   yum install cyrus-sasl{,-plain}
+
+Create Gmail Authentication file
+  mkdir -m 700 /etc/mail/authinfo/
+  cd /etc/mail/authinfo/
+  Create gmail-auth with following contents
+     AuthInfo: "U:root" "I:sthaid@gmail.com" "P:account_password"
+
+Create a hash map for the above authentication file:
+  makemap hash gmail-auth < gmail-auth
+
+Put these lines into your /etc/mail/sendmail.mc configuration file right above 
+first "MAILER" definition line:
+  define(`SMART_HOST',`[smtp.gmail.com]')dnl
+  define(`RELAY_MAILER_ARGS', `TCP $h 587')dnl
+  define(`ESMTP_MAILER_ARGS', `TCP $h 587')dnl
+  define(`confAUTH_OPTIONS', `A p')dnl
+  TRUST_AUTH_MECH(`EXTERNAL DIGEST-MD5 CRAM-MD5 LOGIN PLAIN')dnl
+  define(`confAUTH_MECHANISMS', `EXTERNAL GSSAPI DIGEST-MD5 CRAM-MD5 LOGIN PLAIN')dnl
+  FEATURE(`authinfo',`hash -o /etc/mail/authinfo/gmail-auth.db')dnl
+
+Re-build sendmail configuration.
+  make -C /etc/mail
+
+Restart service
+  systemctl restart sendmail
+
+Test
+  echo "test sendmail gmail relay" | \
+    mail -s "Sendmail gmail Relay" phonenumber@vtext.com
 

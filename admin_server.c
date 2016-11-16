@@ -44,6 +44,12 @@ SOFTWARE.
 // location of user account files
 #define USER_DIR "user"
 
+// XXX comment
+#define GET_TEMPERATURE(_onlwc) \
+    ((((_onlwc)->last_temperature_time_us != 0) && \
+      (microsec_timer() - (_onlwc)->last_temperature_time_us < 60*1000000)) \
+     ? (_onlwc)->temperature : INVALID_TEMPERATURE)
+
 //
 // typedefs
 //
@@ -51,21 +57,26 @@ SOFTWARE.
 typedef struct {
     char wc_name[MAX_WC_NAME+1];
     char wc_macaddr[MAX_WC_MACADDR+1];
+    int  temp_low_limit;
+    int  temp_high_limit;
 } user_wc_t;
 
 typedef struct {
     char     user_name[MAX_USERNAME+1];
     char     password[MAX_PASSWORD+1];
-    char     reserver[22];
+    char     phonenumber[MAX_PHONENUMBER+1];
+    char     reserver[157];
     user_wc_t wc[MAX_USER_WC];
 } user_t;
 
 typedef struct {
-    version_t version;
     char      wc_macaddr[MAX_WC_MACADDR+1];
+    version_t version;
     struct    sockaddr_in wc_addr;
     struct    sockaddr_in wc_addr_behind_nat;
     uint64_t  last_announce_rcv_time_us;
+    int       temperature;
+    uint64_t  last_temperature_time_us;
 } onl_wc_t;
 
 //
@@ -100,7 +111,7 @@ bool cmd_delete_account(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_version(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_exit(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_su(user_t * u, FILE * fp, int argc, char ** argv);
-bool cmd_set_password(user_t * u, FILE * fp, int argc, char ** argv);
+bool cmd_edit_user(user_t * u, FILE * fp, int argc, char ** argv);
 void read_all_user_files(void);
 bool create_user_file(user_t * u);
 bool update_user_file(user_t * u);
@@ -493,13 +504,13 @@ cmd_tbl_t cmd_tbl[] = {
     { "add_wc", cmd_add_wc, 2, 2, 
       "add_wc <wc_name> <wc_macaddr> - add webcam" },
     { "edit_wc", cmd_edit_wc, 3, 3, 
-      "edit_wc <wc_name> <property:name|XXX> <new_value> - update specified property" },
+      "edit_wc <wc_name> <property:name|templo|temphi> <new_value> - update specified property" },
     { "del_wc", cmd_del_wc, 1, 1, 
       "del_wc <wc_name> - delete webcam" },
     { "ls", cmd_ls, 0, 2, 
       "ls [-v] [unclaimed|everyone|<user_name>] - displa webcam info" },
-    { "set_password", cmd_set_password, 1, 1, 
-      "set_password <new_password> - set password" },
+    { "edit_user", cmd_edit_user, 2, 2, 
+      "edit_user <property:password|phonenumber> <new_value> - update specified property" },
     { "delete_account", cmd_delete_account, 0, 0, 
       "delete_account - deletes the current user account and logout" },
     { "version", cmd_version, 0, 0, 
@@ -649,14 +660,15 @@ bool cmd_add_wc(user_t * u, FILE * fp, int argc, char ** argv)
     bzero(wc, sizeof(user_wc_t));
     strncpy(wc->wc_name, wc_name, MAX_WC_NAME);
     strncpy(wc->wc_macaddr, wc_macaddr, MAX_WC_MACADDR);
+    wc->temp_low_limit = INVALID_TEMPERATURE;
+    wc->temp_high_limit = INVALID_TEMPERATURE;
     update_user_file(u);
 
     // return, no-logout
     return false;
 }
 
-// edit_wc XXX more later
-// edit_wc <wc_name> <property:name|XXX> <new_value> - update specified property
+// edit_wc <wc_name> <property:name|templo|temphi> <new_value> - update specified property
 bool cmd_edit_wc(user_t * u, FILE * fp, int argc, char ** argv) 
 {
     char * wc_name   = argv[0];
@@ -691,6 +703,22 @@ bool cmd_edit_wc(user_t * u, FILE * fp, int argc, char ** argv)
         strcpy(wc->wc_name, new_wc_name);
 
         // store change in file
+        update_user_file(u);
+    } else if (strcmp(property, "templo") == 0) {
+        int tlo;
+        if (sscanf(new_value, "%d", &tlo) != 1) {
+            prcl(fp, "error: invalid temp alert low limit, %s\n", new_value);
+            return false;
+        }
+        wc->temp_low_limit = tlo;
+        update_user_file(u);
+    } else if (strcmp(property, "temphi") == 0) {
+        int thi;
+        if (sscanf(new_value, "%d", &thi) != 1) {
+            prcl(fp, "error: invalid temp alert low limit, %s\n", new_value);
+            return false;
+        }
+        wc->temp_high_limit = thi;
         update_user_file(u);
     } else {
         prcl(fp, "error: invalid property '%s'\n", property);
@@ -767,7 +795,6 @@ bool cmd_ls(user_t * u, FILE * fp, int argc, char ** argv)
             if (user[i].user_name[0] == '\0' || IS_ROOT(&user[i])) {
                 continue;
             }
-            prcl(fp, "USER: %s\n", user[i].user_name);
             display_user(fp,&user[i],verbose);
             prcl(fp, "\n");
         }
@@ -782,7 +809,6 @@ bool cmd_ls(user_t * u, FILE * fp, int argc, char ** argv)
             prcl(fp, "error: user %s does not exist\n", argv[0]);
             return false;
         }
-        prcl(fp, "USER: %s\n", u->user_name);
         display_user(fp, u, verbose);
     }
 
@@ -850,24 +876,46 @@ bool cmd_su(user_t * u, FILE * fp, int argc, char ** argv)
     return false;
 }
 
-// set_password <new_password> - set password
-bool cmd_set_password(user_t * u, FILE * fp, int argc, char ** argv) 
+// edit_user <property:password|phonenumber> <new_value> - update specified property
+bool cmd_edit_user(user_t * u, FILE * fp, int argc, char ** argv) 
 {
-    char * new_passwd = argv[0];
-    int    status;
+    char * property  = argv[0];
+    char * new_value = argv[1];
 
-    // validate new_password
-    if (!verify_password(new_passwd, &status)) {
-        prcl(fp, "error: new_password invalid, %s\n", status2str(status));
-        return false;
+    // update selected property
+    if (strcmp(property, "password") == 0) {
+        char * new_passwd = new_value;
+        int    status;
+
+        // validate new_password
+        if (!verify_password(new_passwd, &status)) {
+            prcl(fp, "error: new_password invalid, %s\n", status2str(status));
+            return false;
+        }
+
+        // set new_password and write user file
+        strcpy(u->password, new_passwd);
+        update_user_file(u);
+
+        // print
+        prcl(fp, "password has been changed for user %s\n", u->user_name);
+    } else if (strcmp(property, "phonenumber") == 0) {
+        char * new_phonenumber = new_value;
+
+        // XXX validate phonenumber
+
+        // set phonenumber and write user file
+        strcpy(u->phonenumber, new_phonenumber);
+        update_user_file(u);
+
+        // print
+        prcl(fp, "phonenumber has been changed for user %s to %s\n", 
+             u->user_name, u->phonenumber);
+    } else {
+        prcl(fp, "error: invalid property '%s'\n", property);
     }
 
-    // set new_password and write user file
-    strcpy(u->password, new_passwd);
-    update_user_file(u);
-
     // return no-logout
-    prcl(fp, "password has been changed for user %s\n", u->user_name);
     return false;
 }
 
@@ -1086,6 +1134,10 @@ void display_user(FILE * fp, user_t * u, bool verbose)
 {
     int i;
 
+    prcl(fp, "USER: %s  PHONE=%s\n", 
+         u->user_name,
+         u->phonenumber[0] == '\0' ? "unset" : u->phonenumber);
+
     for (i = 0; i < MAX_USER_WC; i++) {
         if (u->wc[i].wc_name[0] == '\0') {
             continue;
@@ -1097,54 +1149,68 @@ void display_user(FILE * fp, user_t * u, bool verbose)
 void display_user_wc(FILE * fp, user_t * u, int u_wc_idx, bool verbose)
 {
     user_wc_t * wc;
-    char      * state;
+    char      * state_str;
     char        verb_str[1000];
     char        online_wc_addr_str[100];
     char        online_wc_addr_behind_nat_str[100];
+    char        temper_str[100];
     int         i;
+    int         curr_temper;
+    char      * p;
 
     // init locals
     wc          = &u->wc[u_wc_idx];
-    state       = "unknown";
+    state_str   = "offline";
     verb_str[0] = '\0';
+    curr_temper = INVALID_TEMPERATURE;
 
     // search the onl_wc table to see if wc_macaddr is online, and 
-    // set verb_str
+    // set state, temper, and verb_str
     for (i = 0; i < max_onl_wc; i++) {
         if (onl_wc[i].wc_macaddr[0] != '\0' &&
             strcmp(wc->wc_macaddr, onl_wc[i].wc_macaddr) == 0) 
         {
-            state = "online";
-            sprintf(verb_str, "%d.%d %s %s",
-                    onl_wc[i].version.major, onl_wc[i].version.minor,
-                    sock_addr_to_str(online_wc_addr_str, sizeof(online_wc_addr_str), 
-                                     (struct sockaddr *)&onl_wc[i].wc_addr),
-                    sock_addr_to_str(online_wc_addr_behind_nat_str, sizeof(online_wc_addr_behind_nat_str), 
-                                     (struct sockaddr *)&onl_wc[i].wc_addr_behind_nat));
+            state_str = "online";
+            curr_temper = GET_TEMPERATURE(&onl_wc[i]);
+            if (verbose) {
+                sprintf(verb_str, "%d.%d %s %s",
+                        onl_wc[i].version.major, onl_wc[i].version.minor,
+                        sock_addr_to_str(online_wc_addr_str, sizeof(online_wc_addr_str), 
+                                        (struct sockaddr *)&onl_wc[i].wc_addr),
+                        sock_addr_to_str(online_wc_addr_behind_nat_str, sizeof(online_wc_addr_behind_nat_str), 
+                                        (struct sockaddr *)&onl_wc[i].wc_addr_behind_nat));
+            }
             break;
         }
     }
-    if (i == max_onl_wc) {
-        state = "offline";
+
+    // create temper_str  XXX comment
+    sprintf(temper_str, "%3d F (%d:%d)",
+            curr_temper, 
+            wc->temp_low_limit,
+            wc->temp_high_limit);
+    if ((p = strstr(temper_str, "999 F")) != NULL) {
+        memcpy(p, "     ", 5);
+    }
+    if ((p = strstr(temper_str, "999")) != NULL) {
+        memcpy(p, "unl", 3);
+    }
+    if ((p = strstr(temper_str, "999")) != NULL) {
+        memcpy(p, "unl", 3);
     }
 
-    // print - example:
-    // - kitchen      steve        online  80:1f:02:d3:9f:0c  1.3 73.218.14.230:36657 192.168.1.121:36657
-    //   123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 
-    char   str[1000];
-    char * s = str;
-    s += sprintf(s, "%-12s %-12s %-7s %-17s ", 
+    // print webcam status
+    // 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 123456789 
+    // kitchen       steve         online    77 F (xxx-xxx)  80:1f:02:d3:9f:0c  1.3 73.218.14.230:36657 192.168.1.121:36657
+    // xxxxxxxxxxxx  xxxxxxxxxxxx  xxxxxxx  xxxxxxxxxxxxxxx  xxxxxxxxxxxxxxxxx  xxxxxxxxxx....
+    //      12            12           7         15              17 
+    prcl(fp, "%-12s  %-12s  %-7s  %-15s  %17s  %s\n",
                  wc->wc_name, 
                  u->user_name, 
-                 state,
-                 wc->wc_macaddr);
-    if (verbose) {
-        if (strlen(str) < 54) {
-            s += sprintf(s, "%*s", (int)(54-strlen(str)), "");
-        }
-        s += sprintf(s, "%s", verb_str);
-    }
-    prcl(fp, "%s\n", str);
+                 state_str,
+                 temper_str,
+                 wc->wc_macaddr,
+                 verb_str);
 }
 
 void display_unclaimed(FILE * fp, bool verbose)
@@ -1592,6 +1658,7 @@ void * dgram_thread(void * cx)
             char s1[100], s2[100];
             struct sockaddr_in * wc_addr = &from_addr;
             bool just_gone_online = false;
+            bool log_msg = false;
 
             // verify wc_macaddr
             if (verify_wc_macaddr(dgram_rcv.u.wc_announce.wc_macaddr) == false) {
@@ -1628,37 +1695,46 @@ void * dgram_thread(void * cx)
                 just_gone_online = true;
             }
 
-            // construct a new entry for onl_wc;
-            // note - at this point the last_announce_rcv_time_us field is left unchanged
-            //        to support the memcmp below; the last_announce_rcv_time_us field is
-            //        subsequently updated to the current time
-            onl_wc_t x;
-            bzero(&x, sizeof(x));
-            x.version = dgram_rcv.u.wc_announce.version;
-            strcpy(x.wc_macaddr, dgram_rcv.u.wc_announce.wc_macaddr);
-            x.wc_addr = *wc_addr;
-            x.wc_addr_behind_nat = dgram_rcv.u.wc_announce.wc_addr_behind_nat;
-            x.last_announce_rcv_time_us = onl_wc[idx].last_announce_rcv_time_us; 
-
-            // if the new info is different from what was there before then 
-            // - issue notice 
-            // - publish new info
+            // if just_gone_online then
+            //    init all fields 
+            // else if any of these has changed: version, wc_addr, or wc_addr_behind_nat then
+            //    update the changed fields, and the last_announce_rcv_time
+            // else
+            //    just set the last_announce_rcv_time
             // endif
-            if (memcmp(&x, &onl_wc[idx], sizeof(onl_wc_t)) != 0) {
-                // issue notice
-                INFO("wc %s v%d.%d %s, %s/%s\n",
-                     x.wc_macaddr,
-                     x.version.major, x.version.minor,
-                     just_gone_online ? "is now online" : "update",
-                     sock_addr_to_str(s1,sizeof(s1),(struct sockaddr*)&x.wc_addr),
-                     sock_addr_to_str(s2,sizeof(s2),(struct sockaddr*)&x.wc_addr_behind_nat));
-
-                // publish new entry
-                onl_wc[idx] = x;
+            onl_wc_t * x = &onl_wc[idx];
+            if (just_gone_online) {
+                bzero(x, sizeof(onl_wc_t));
+                strcpy(x->wc_macaddr, dgram_rcv.u.wc_announce.wc_macaddr);
+                x->version                   = dgram_rcv.u.wc_announce.version;
+                x->wc_addr                   = *wc_addr;
+                x->wc_addr_behind_nat        = dgram_rcv.u.wc_announce.wc_addr_behind_nat;
+                x->last_announce_rcv_time_us = microsec_timer();
+                x->temperature               = INVALID_TEMPERATURE;
+                log_msg = true;
+            } else if (memcmp(&x->version, &dgram_rcv.u.wc_announce.version, sizeof(version_t)) != 0 ||
+                       memcmp(&x->wc_addr, wc_addr, sizeof(struct sockaddr_in)) != 0 ||
+                       memcmp(&x->wc_addr_behind_nat, &dgram_rcv.u.wc_announce.wc_addr_behind_nat, sizeof(struct sockaddr_in)) != 0)
+            {
+                x->version = dgram_rcv.u.wc_announce.version;
+                x->wc_addr = *wc_addr;
+                x->wc_addr_behind_nat = dgram_rcv.u.wc_announce.wc_addr_behind_nat;
+                x->last_announce_rcv_time_us = microsec_timer();
+                log_msg = true;
+            } else {
+                x->last_announce_rcv_time_us = microsec_timer();
+                log_msg = false;
             }
 
-            // update the last_announce_rcv_time_us to the current time
-            onl_wc[idx].last_announce_rcv_time_us = microsec_timer();
+            // log a msg, if needed
+            if (log_msg) {
+                INFO("wc %s v%d.%d %s, %s/%s\n",
+                     x->wc_macaddr,
+                     x->version.major, x->version.minor,
+                     just_gone_online ? "is now online" : "update",
+                     sock_addr_to_str(s1,sizeof(s1),(struct sockaddr*)&x->wc_addr),
+                     sock_addr_to_str(s2,sizeof(s2),(struct sockaddr*)&x->wc_addr_behind_nat));
+            }
         } while (0);
 
         // if dgram is CONNECT_REQ (from a client) then
@@ -1769,13 +1845,19 @@ connect_reject:
         } while (0);
 
         // if dgram is TEMPERATURE (from webcam) then
-        // XXX
         if (dgram_rcv.id == DGRAM_ID_TEMPERATURE) do {
-            char  s[100];
-            INFO("recv dgram %s from %s, temp=%d\n", 
+            onl_wc_t           * onlwc;
+
+            INFO("recv dgram %s from %s, temp=%d\n",   // XXX debug
                 DGRAM_ID_STR(dgram_rcv.id),
-                sock_addr_to_str(s,sizeof(s),(struct sockaddr*)&from_addr),
+                dgram_rcv.u.temperature.wc_macaddr,
                 dgram_rcv.u.temperature.temperature);
+
+            onlwc = find_onl_wc_from_macaddr(dgram_rcv.u.temperature.wc_macaddr);
+            if (onlwc != NULL) {
+                onl_wc->temperature =  dgram_rcv.u.temperature.temperature;
+                onl_wc->last_temperature_time_us = microsec_timer();
+            }
         } while (0);
     }
 
