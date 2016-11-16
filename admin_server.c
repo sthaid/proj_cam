@@ -76,7 +76,9 @@ typedef struct {
     struct    sockaddr_in wc_addr_behind_nat;
     uint64_t  last_announce_rcv_time_us;
     int       temperature;
+    uint64_t  time_went_online_us;
     uint64_t  last_temperature_time_us;
+    uint64_t  last_temper_alert_send_time_us;
 } onl_wc_t;
 
 //
@@ -112,6 +114,7 @@ bool cmd_version(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_exit(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_su(user_t * u, FILE * fp, int argc, char ** argv);
 bool cmd_edit_user(user_t * u, FILE * fp, int argc, char ** argv);
+bool cmd_text_msg_test(user_t * u, FILE * fp, int argc, char ** argv);
 void read_all_user_files(void);
 bool create_user_file(user_t * u);
 bool update_user_file(user_t * u);
@@ -143,6 +146,10 @@ void dgram_init(void);
 void * dgram_thread(void * cx);
 void * dgram_monitor_onl_wc_thread(void * cx);
 uint64_t gen_con_id(void);
+
+void temper_monitor_init(void);
+void * temperature_monitor_thread(void * cx);
+void send_text_message(char * phonenumber, char * subject, char * body);
 
 // -----------------  MAIN  ---------------------------------------
 
@@ -192,6 +199,7 @@ int main(int argc, char ** argv)
     // call subsystem initialization routines
     account_init();
     dgram_init();
+    temper_monitor_init();
 
     // create listen socket, and
     // set socket option SO_REUSEADDR; and
@@ -511,6 +519,8 @@ cmd_tbl_t cmd_tbl[] = {
       "ls [-v] [unclaimed|everyone|<user_name>] - displa webcam info" },
     { "edit_user", cmd_edit_user, 2, 2, 
       "edit_user <property:password|phonenumber> <new_value> - update specified property" },
+    { "text_msg_test", cmd_text_msg_test, 0, 0,
+      "text_msg_test - send test text message to user's phone number" },
     { "delete_account", cmd_delete_account, 0, 0, 
       "delete_account - deletes the current user account and logout" },
     { "version", cmd_version, 0, 0, 
@@ -914,6 +924,22 @@ bool cmd_edit_user(user_t * u, FILE * fp, int argc, char ** argv)
     } else {
         prcl(fp, "error: invalid property '%s'\n", property);
     }
+
+    // return no-logout
+    return false;
+}
+
+// text_msg_test - send test text message to user's phone number
+bool cmd_text_msg_test(user_t * u, FILE * fp, int argc, char ** argv) 
+{
+    // verify user has provided a phone number
+    if (u->phonenumber[0] == '\0') {
+        prcl(fp, "error: phone number has not been provided\n");
+        return false;
+    }
+
+    // send the test text message
+    send_text_message(u->phonenumber, "TEMPER ALERT", "this is only a test");
 
     // return no-logout
     return false;
@@ -1706,11 +1732,14 @@ void * dgram_thread(void * cx)
             if (just_gone_online) {
                 bzero(x, sizeof(onl_wc_t));
                 strcpy(x->wc_macaddr, dgram_rcv.u.wc_announce.wc_macaddr);
-                x->version                   = dgram_rcv.u.wc_announce.version;
-                x->wc_addr                   = *wc_addr;
-                x->wc_addr_behind_nat        = dgram_rcv.u.wc_announce.wc_addr_behind_nat;
-                x->last_announce_rcv_time_us = microsec_timer();
-                x->temperature               = INVALID_TEMPERATURE;
+                x->version                        = dgram_rcv.u.wc_announce.version;
+                x->wc_addr                        = *wc_addr;
+                x->wc_addr_behind_nat             = dgram_rcv.u.wc_announce.wc_addr_behind_nat;
+                x->last_announce_rcv_time_us      = microsec_timer();
+                x->temperature                    = INVALID_TEMPERATURE;
+                x->time_went_online_us            = microsec_timer();
+                x->last_temperature_time_us       = 0;
+                x->last_temper_alert_send_time_us = 0;
                 log_msg = true;
             } else if (memcmp(&x->version, &dgram_rcv.u.wc_announce.version, sizeof(version_t)) != 0 ||
                        memcmp(&x->wc_addr, wc_addr, sizeof(struct sockaddr_in)) != 0 ||
@@ -1902,5 +1931,107 @@ uint64_t gen_con_id(void)
 
     con_id++;
     return con_id;
+}
+
+// ----------------- TEMPERATURE MONITOR  -----------------------------------
+
+void temper_monitor_init(void)
+{
+    pthread_t thread;
+
+    pthread_create(&thread, NULL, temperature_monitor_thread, NULL);
+}
+
+void * temperature_monitor_thread(void * cx)
+{
+    onl_wc_t  * onlwc;
+    user_wc_t * wc;
+    user_t    * u;
+    int         curr_temper;
+    int         i;
+    char        alert_str[100];
+    uint64_t    curr_us;
+
+    INFO("thread starting\n");  // XXX debug
+
+    while (true) {
+        // check every minute
+        sleep(60);
+
+        // loop over online webcams
+        for (i = 0; i < max_onl_wc; i++) {
+            // if unused entry in table then contine
+            onlwc = &onl_wc[i];
+            if (onlwc->wc_macaddr[0] == '\0') {
+                continue;
+            }
+
+            // from onlwc, find wc and u;
+            // if wc or u not found then continue
+            wc = find_user_wc_from_macaddr(onlwc->wc_macaddr, &u);
+            if (!wc || !u) {
+                continue;
+            }
+
+            // if no user phonenumber then continue
+            if (u->phonenumber[0] == '\0') {
+                continue;
+            }
+
+            INFO("CHECKING %s\n", wc->wc_name);  //XXX
+
+            // if temperature limits are not set then continue
+            if (wc->temp_low_limit == INVALID_TEMPERATURE &&
+                wc->temp_high_limit == INVALID_TEMPERATURE)
+            {
+                continue;
+            }
+
+            // if online for less than 1 minute then continue
+            curr_us = microsec_timer();
+            if (curr_us - onlwc->time_went_online_us < 60L*1000000) {
+                continue;
+            }
+
+            // if alert sent within last 24 hours then continue
+            if (onlwc->last_temper_alert_send_time_us != 0 &&
+                curr_us - onlwc->last_temper_alert_send_time_us < 24L*3600*1000000) 
+            {
+                continue;
+            }
+
+            // if invalid temperature then send alert
+            curr_temper = GET_TEMPERATURE(&onl_wc[i]);
+            if (curr_temper == INVALID_TEMPERATURE) {
+                sprintf(alert_str, "%s temp unavail", wc->wc_name);
+                send_text_message(u->phonenumber, "TEMPER ALERT", alert_str);
+                onlwc->last_temper_alert_send_time_us = curr_us;
+            }
+
+            // if temperature not in valid range then send alert
+            if (curr_temper < wc->temp_low_limit || curr_temper > wc->temp_high_limit) {
+                sprintf(alert_str, "%s %d F", wc->wc_name, curr_temper);
+                send_text_message(u->phonenumber, "TEMPER ALERT", alert_str);
+                onlwc->last_temper_alert_send_time_us = curr_us;
+            }
+        }
+    }
+}
+
+void send_text_message(char * phonenumber, char * subject, char * body)
+{
+    char cmd[10000];
+
+    INFO("sending text message to:\n"
+         "  phonenumber: %s\n"
+         "  subject:     %s\n"
+         "  body:        %s\n",
+         phonenumber, subject, body);
+
+    sprintf(cmd, "echo \"%s\" | mail -s \"%s\" %s@vtext.com",
+            body, subject, phonenumber);
+    DEBUG("cmd = %s\n", cmd);
+
+    system(cmd);
 }
 
