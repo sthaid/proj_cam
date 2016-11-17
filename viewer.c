@@ -31,6 +31,12 @@ SOFTWARE.
 // XXX changing Android orientatiton not always working
 // XXX mode locking
 
+// XXX portrait issues
+// XXX test on android and phone
+// XXX can button surround be increased, and order the events
+// XXX do we really need LANDSCAE and PORTRAIT
+// XXX install other rasp pis
+
 //
 // defines 
 //
@@ -71,16 +77,16 @@ SOFTWARE.
 #define MAX_FONT                    2
 #define PANE_COLS(p,fid)            ((p)->w / font[fid].char_width)
 #define PANE_ROWS(p,fid)            ((p)->h / font[fid].char_height)
-#ifndef ANDROID
+#ifndef ANDROID  // XXX ? on android
 #define FONT0_PATH                   "/usr/share/fonts/gnu-free/FreeMonoBold.ttf"
-#define FONT0_PTSIZE                 20
+#define FONT0_PTSIZE                 40
 #define FONT1_PATH                   "/usr/share/fonts/gnu-free/FreeMonoBold.ttf"
-#define FONT1_PTSIZE                 32
+#define FONT1_PTSIZE                 50
 #else
 #define FONT0_PATH                   "/system/fonts/DroidSansMono.ttf"
-#define FONT0_PTSIZE                 24
+#define FONT0_PTSIZE                 40
 #define FONT1_PATH                   "/system/fonts/DroidSansMono.ttf"
-#define FONT1_PTSIZE                 40 
+#define FONT1_PTSIZE                 50 
 #endif
 
 #define MAX_MOUSE_EVENT                       256
@@ -112,9 +118,9 @@ SOFTWARE.
 #define MOUSE_EVENT_CONFIG_KEY_BS             129
 #define MOUSE_EVENT_CONFIG_KEY_ENTER          130
 #define MOUSE_EVENT_WC_NAME_LIST              140    // 8 list events per wc, 32 total
-#define MOUSE_EVENT_WC_ZOOM                   180    // 4 webcams
-#define MOUSE_EVENT_WC_NAME                   190    // 4 webcams
-#define MOUSE_EVENT_WC_RES                    200    // 4 webcams
+#define MOUSE_EVENT_WC_NAME                   180    // 4 webcams
+#define MOUSE_EVENT_WC_RES                    190    // 4 webcams
+#define MOUSE_EVENT_WC_ZOOM                   200    // 4 webcams
 
 #define QUIT_EVENT_REASON_MOUSE               1
 #define QUIT_EVENT_REASON_SDL                 2
@@ -378,8 +384,8 @@ config_t         config[] = { { "username",  "demo"        },
 void server_check(void);
 void * server_check_thread(void * cx);
 void display_handler(void);
-void render_text(SDL_Rect * pane, int row, int col, char * str, int mouse_event);
-void render_text_ex(SDL_Rect * pane, int row, int col, char * str, int mouse_event, int field_cols, bool center, int font_id);
+void render_text(SDL_Rect * pane, double row, double col, char * str, int mouse_event);
+void render_text_ex(SDL_Rect * pane, double row, double col, char * str, int mouse_event, int field_cols, bool center, int font_id);
 void * webcam_thread(void * cx);
 #ifndef ANDROID
 void * debug_thread(void * cx);
@@ -650,6 +656,9 @@ void * server_check_thread(void * cx)
     }
     fputs("ls\n", fp);
     while (fgets(s, sizeof(s), fp) != NULL) {
+        if (strncmp(s, "USER", 4) == 0) {
+            continue;
+        }
         if (max_webcam_names == MAX_USER_WC+1) {
             break;
         }
@@ -678,10 +687,11 @@ void display_handler(void)
             (r).h = (_h); \
         } while (0)
 
-    #define MOUSE_AT_POS(pos) ((ev.button.x >= (pos).x - 5) && \
-                               (ev.button.x < (pos).x + (pos).w + 5) && \
-                               (ev.button.y >= (pos).y - 5) && \
-                               (ev.button.y < (pos).y + (pos).h + 5))
+    // XXX make surround bigger  XXX TEST, was 5
+    #define MOUSE_AT_POS(pos) ((ev.button.x >= (pos).x - 10) && \
+                               (ev.button.x < (pos).x + (pos).w + 10) && \
+                               (ev.button.y >= (pos).y - 10) && \
+                               (ev.button.y < (pos).y + (pos).h + 10))
 
     #define LANDSCAPE() (win_width >= win_height)
     #define PORTRAIT()  (!LANDSCAPE())
@@ -1577,7 +1587,7 @@ void display_handler(void)
             if (wc->name_select_mode) {
                 // display the list of available webcam names to choose from
                 for (j = 0; j < max_webcam_names; j++) {
-                    render_text(&wcimagepane[i], 1+2*j, 0, 
+                    render_text(&wcimagepane[i], 0.5+1.5*j, 0, 
                                 webcam_names[j],
                                 MOUSE_EVENT_WC_NAME_LIST + 8 * i + j);
                 }
@@ -1618,8 +1628,19 @@ void display_handler(void)
                 // copy the texture to the render target
                 SDL_RenderCopy(renderer, wc->texture, NULL, &wcimagepane[i]);
 
-                //XXX temper
-                INFO("XXX %d temperature = %d\n", i, wc->image_temperature);
+                // display the temperature
+                if (wc->image_temperature != INVALID_TEMPERATURE) {
+                    char temper_str[50];
+                    DEBUG("%s is %d F\n", wc->image_name, wc->image_temperature);
+                    sprintf(temper_str, "%d F", wc->image_temperature);
+                    render_text_ex(&wcimagepane[i],
+                                   0, 0,                          // row, col
+                                   temper_str, 
+                                   MOUSE_EVENT_NONE,
+                                   PANE_COLS(&wcimagepane[i],1),  // field_cols
+                                   true,                         // center, 
+                                   1);                            // font_id
+                }
 
                 // register for the zoom event
                 event.mouse_event_pos[MOUSE_EVENT_WC_ZOOM+i] = wcimagepane[i];
@@ -1905,11 +1926,11 @@ void display_handler(void)
             break; }
 
         }
-
-        // config & quit
-        render_text(&ctlbpane, 6, 0, !config_mode ? "CONFIG" : "BACK", MOUSE_EVENT_CONFIG_SELECT);
-        render_text(&ctlbpane, 6, 10, "QUIT", MOUSE_EVENT_QUIT);
     }
+
+    // config & quit
+    render_text(&ctlbpane, 6, 0, !config_mode ? "CONFIG" : "BACK", MOUSE_EVENT_CONFIG_SELECT);
+    render_text(&ctlbpane, 6, 10, "QUIT", MOUSE_EVENT_QUIT);
 
     // -----------------
     // ---- present ----
@@ -1918,12 +1939,12 @@ void display_handler(void)
     SDL_RenderPresent(renderer);
 }
 
-void render_text(SDL_Rect * pane, int row, int col, char * str, int mouse_event)
+void render_text(SDL_Rect * pane, double row, double col, char * str, int mouse_event)
 {
     render_text_ex(pane, row, col, str, mouse_event, PANE_COLS(pane,0), false, 0);
 }
 
-void render_text_ex(SDL_Rect * pane, int row, int col, char * str, int mouse_event, int field_cols, bool center, int font_id)
+void render_text_ex(SDL_Rect * pane, double row, double col, char * str, int mouse_event, int field_cols, bool center, int font_id)
 {
     SDL_Surface    * surface; 
     SDL_Texture    * texture; 
