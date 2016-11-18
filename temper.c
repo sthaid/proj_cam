@@ -267,7 +267,9 @@ static struct sockaddr_in get_admin_server_addr(void)
 #define INTERFACE1 0x00
 #define INTERFACE2 0x01
 
-#define CALIBRATION_DEG_F (-2)
+// usb extension cable:  -2
+// micro usb hub:        -8
+#define CALIBRATION_DEG_F (-8)
 
 // variables
 

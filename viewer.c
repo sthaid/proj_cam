@@ -30,12 +30,8 @@ SOFTWARE.
 // XXX is locking needed around SDL_UpdateTexture
 // XXX changing Android orientatiton not always working
 // XXX mode locking
-
 // XXX portrait issues
-// XXX test on android and phone
-// XXX can button surround be increased, and order the events
 // XXX do we really need LANDSCAE and PORTRAIT
-// XXX install other rasp pis
 
 //
 // defines 
@@ -77,16 +73,16 @@ SOFTWARE.
 #define MAX_FONT                    2
 #define PANE_COLS(p,fid)            ((p)->w / font[fid].char_width)
 #define PANE_ROWS(p,fid)            ((p)->h / font[fid].char_height)
-#ifndef ANDROID  // XXX ? on android
+#ifndef ANDROID
 #define FONT0_PATH                   "/usr/share/fonts/gnu-free/FreeMonoBold.ttf"
 #define FONT0_PTSIZE                 40
 #define FONT1_PATH                   "/usr/share/fonts/gnu-free/FreeMonoBold.ttf"
-#define FONT1_PTSIZE                 50
+#define FONT1_PTSIZE                 48
 #else
 #define FONT0_PATH                   "/system/fonts/DroidSansMono.ttf"
 #define FONT0_PTSIZE                 40
 #define FONT1_PATH                   "/system/fonts/DroidSansMono.ttf"
-#define FONT1_PTSIZE                 50 
+#define FONT1_PTSIZE                 48 
 #endif
 
 #define MAX_MOUSE_EVENT                       256
@@ -687,7 +683,6 @@ void display_handler(void)
             (r).h = (_h); \
         } while (0)
 
-    // XXX make surround bigger  XXX TEST, was 5
     #define MOUSE_AT_POS(pos) ((ev.button.x >= (pos).x - 10) && \
                                (ev.button.x < (pos).x + (pos).w + 10) && \
                                (ev.button.y >= (pos).y - 10) && \
@@ -1389,7 +1384,7 @@ void display_handler(void)
             render_text(&ctlpane, 0, 0, "CONFIGURE", MOUSE_EVENT_NONE);
 
             // server section
-            render_text(&ctlpane, 2, 0, "-- SERVER --", MOUSE_EVENT_NONE);
+            render_text(&ctlpane, 1.5, 0, "-- SERVER --", MOUSE_EVENT_NONE);
 
             if (config_keybd_mode == CONFIG_KEYBD_MODE_USERNAME) {
                 bool cursor_blink_on = ((curr_us % 1000000) > 500000);
@@ -1402,7 +1397,7 @@ void display_handler(void)
                 strcpy(str, CONFIG_USERNAME);
             }
             len = strlen(str);
-            render_text(&ctlpane, 3, 0, str, MOUSE_EVENT_CONFIG_USERNAME);
+            render_text(&ctlpane, 2.5, 0, str, MOUSE_EVENT_CONFIG_USERNAME);
 
             if (config_keybd_mode == CONFIG_KEYBD_MODE_PASSWORD) {
                 bool cursor_blink_on = ((curr_us % 1000000) > 500000);
@@ -1416,28 +1411,28 @@ void display_handler(void)
             } else {
                 strcpy(str, "********");
             }
-            render_text(&ctlpane, 5, 0, str, MOUSE_EVENT_CONFIG_PASSWORD);
+            render_text(&ctlpane, 4, 0, str, MOUSE_EVENT_CONFIG_PASSWORD);
 
-            render_text(&ctlpane, 7, 0, "SERVER_CHECK", MOUSE_EVENT_CONFIG_SERVER_CHECK);
-            render_text(&ctlpane, 8, 0, status2str(server_check_status), MOUSE_EVENT_NONE);
+            render_text(&ctlpane, 5.5, 0, "SERVER_CHECK", MOUSE_EVENT_CONFIG_SERVER_CHECK);
+            render_text(&ctlpane, 6.5, 0, status2str(server_check_status), MOUSE_EVENT_NONE);
             if (server_check_status == STATUS_INFO_OK) {
                 sprintf(str, ": WC_CNT=%d", max_webcam_names-1);
-                render_text(&ctlpane, 8, 2, str, MOUSE_EVENT_NONE);
+                render_text(&ctlpane, 6.5, 2, str, MOUSE_EVENT_NONE);
             }
 
             // network section
-            render_text(&ctlpane, 10, 0, "-- NETWORK --", MOUSE_EVENT_NONE);
-            render_text(&ctlpane, 11, 0, 
+            render_text(&ctlpane, 8.0, 0, "-- NETWORK --", MOUSE_EVENT_NONE);
+            render_text(&ctlpane, 9.0, 0, 
                         CONFIG_PROXY == 'N' ? "PROXY DISABLED" : "PROXY ENABLED",
                         MOUSE_EVENT_CONFIG_PROXY);
 
             // time section
-            render_text(&ctlpane, 13, 0, "-- TIME --", MOUSE_EVENT_NONE);
-            render_text(&ctlpane, 14, 0, 
+            render_text(&ctlpane, 10.5, 0, "-- TIME --", MOUSE_EVENT_NONE);
+            render_text(&ctlpane, 11.5, 0, 
                         CONFIG_LOCALTIME == 'N' ? "GMT" : "LOCALTIME",
                         MOUSE_EVENT_CONFIG_TIME);
             sprintf(str, "OFF=%"PRId64" MS", system_clock_offset_us/1000);
-            render_text(&ctlpane, 15, 0, str, MOUSE_EVENT_NONE);
+            render_text(&ctlpane, 12.5, 0, str, MOUSE_EVENT_NONE);
         } else {
             // PORTRAIT ...
             //
@@ -1716,48 +1711,48 @@ void display_handler(void)
         // status: date and time
         strcpy(str, date_and_time_str);
         str[8] = '\0';
-        render_text(&ctlpane, 2, 0, str, MOUSE_EVENT_NONE);
-        render_text(&ctlpane, 3, 0, str+9, MOUSE_EVENT_NONE);
+        render_text(&ctlpane, 1.5, 0, str, MOUSE_EVENT_NONE);
+        render_text(&ctlpane, 2.5, 0, str+9, MOUSE_EVENT_NONE);
 
         // status: stop|play|pause, speed, and dir
         struct mode_s m = mode;
-        render_text(&ctlpane, 5, 0, PB_SUBMODE_STR(m.pb_submode), MOUSE_EVENT_NONE);
+        render_text(&ctlpane, 4.0, 0, PB_SUBMODE_STR(m.pb_submode), MOUSE_EVENT_NONE);
         if (m.pb_speed >= 1) {
             sprintf(str, "%s  %.0fX", PB_DIR_STR(m.pb_dir), m.pb_speed);
         } else {
             sprintf(str, "%s  %.2fX", PB_DIR_STR(m.pb_dir), m.pb_speed);
         }
-        render_text(&ctlpane, 6, 0, str, MOUSE_EVENT_NONE);
+        render_text(&ctlpane, 5.0, 0, str, MOUSE_EVENT_NONE);
 
         if (LANDSCAPE()) {
             // control: stop,play,pause
             if (m.pb_submode == PB_SUBMODE_STOP) {
-                render_text(&ctlpane, 8, 0, "PLAY", MOUSE_EVENT_PLAYBACK_PLAY);
-                render_text(&ctlpane, 8, 8, "PAUSE", MOUSE_EVENT_PLAYBACK_PAUSE);
+                render_text(&ctlpane, 6.5, 0, "PLAY", MOUSE_EVENT_PLAYBACK_PLAY);
+                render_text(&ctlpane, 6.5, 8, "PAUSE", MOUSE_EVENT_PLAYBACK_PAUSE);
             } else if (m.pb_submode == PB_SUBMODE_PLAY) {
-                render_text(&ctlpane, 8, 0, "STOP", MOUSE_EVENT_PLAYBACK_STOP);
-                render_text(&ctlpane, 8, 8, "PAUSE", MOUSE_EVENT_PLAYBACK_PAUSE);
+                render_text(&ctlpane, 6.5, 0, "STOP", MOUSE_EVENT_PLAYBACK_STOP);
+                render_text(&ctlpane, 6.5, 8, "PAUSE", MOUSE_EVENT_PLAYBACK_PAUSE);
             } else if (m.pb_submode == PB_SUBMODE_PAUSE) {
-                render_text(&ctlpane, 8, 0, "STOP", MOUSE_EVENT_PLAYBACK_STOP);
-                render_text(&ctlpane, 8, 8, "PLAY", MOUSE_EVENT_PLAYBACK_PLAY);
+                render_text(&ctlpane, 6.5, 0, "STOP", MOUSE_EVENT_PLAYBACK_STOP);
+                render_text(&ctlpane, 6.5, 8, "PLAY", MOUSE_EVENT_PLAYBACK_PLAY);
             } else {
-                render_text(&ctlpane, 8, 0, "????", MOUSE_EVENT_NONE);
-                render_text(&ctlpane, 8, 8, "????", MOUSE_EVENT_NONE);
+                render_text(&ctlpane, 6.5, 0, "????", MOUSE_EVENT_NONE);
+                render_text(&ctlpane, 6.5, 8, "????", MOUSE_EVENT_NONE);
             }
 
             // control: fwd,rev
-            render_text(&ctlpane, 10, 0, "REV", MOUSE_EVENT_PLAYBACK_REVERSE);
-            render_text(&ctlpane, 10, 8, "FWD", MOUSE_EVENT_PLAYBACK_FORWARD);
+            render_text(&ctlpane, 8.0, 0, "REV", MOUSE_EVENT_PLAYBACK_REVERSE);
+            render_text(&ctlpane, 8.0, 8, "FWD", MOUSE_EVENT_PLAYBACK_FORWARD);
 
             // control: fast,slow
-            render_text(&ctlpane, 12, 0, "SLOWER", MOUSE_EVENT_PLAYBACK_SLOWER);
-            render_text(&ctlpane, 12, 8, "FASTER", MOUSE_EVENT_PLAYBACK_FASTER);
+            render_text(&ctlpane, 9.5, 0, "SLOWER", MOUSE_EVENT_PLAYBACK_SLOWER);
+            render_text(&ctlpane, 9.5, 8, "FASTER", MOUSE_EVENT_PLAYBACK_FASTER);
 
             // control: hour-, hour+,min-,min+
-            render_text(&ctlpane, 14, 0, "HOUR-", MOUSE_EVENT_PLAYBACK_HOUR_MINUS);
-            render_text(&ctlpane, 14, 8, "HOUR+", MOUSE_EVENT_PLAYBACK_HOUR_PLUS);
-            render_text(&ctlpane, 16, 0, "MIN-",  MOUSE_EVENT_PLAYBACK_MINUTE_MINUS);
-            render_text(&ctlpane, 16, 8, "MIN+",  MOUSE_EVENT_PLAYBACK_MINUTE_PLUS);
+            render_text(&ctlpane, 11.0, 0, "HOUR-", MOUSE_EVENT_PLAYBACK_HOUR_MINUS);
+            render_text(&ctlpane, 11.0, 8, "HOUR+", MOUSE_EVENT_PLAYBACK_HOUR_PLUS);
+            render_text(&ctlpane, 12.5, 0, "MIN-",  MOUSE_EVENT_PLAYBACK_MINUTE_MINUS);
+            render_text(&ctlpane, 12.5, 8, "MIN+",  MOUSE_EVENT_PLAYBACK_MINUTE_PLUS);
         } else {
             // PORTRAIT ...
             //
