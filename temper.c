@@ -19,8 +19,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 */
-// XXX clean up prints, and review
-// XXX try with a cable
 
 #include "wc.h"
 #include <usb.h>
@@ -167,9 +165,6 @@ static struct sockaddr_in get_admin_server_addr(void)
 }
 
 // -----------------  THREAD - INTERFACE TO TEMPER DEVICE  ---------------
-
-// XXX UPDATE README 
-// XXX checkin pcsensor.tgz
 
 // Purchased USB Thermometer from Amazon on Nov 11, 2016
 //   Device is labelled:  "TEMPer"
@@ -327,7 +322,7 @@ try_again:
 
         curr_temper_degs_f = round(tempf);
         curr_temper_acquire_time = MILLISEC_TIMER;     
-        INFO("read temperature %lf F, %d F\n", tempf, curr_temper_degs_f);  // XXX DEBUG
+        DEBUG("read temperature %lf F, %d F\n", tempf, curr_temper_degs_f);
 
         sleep(1);
     }

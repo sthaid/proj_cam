@@ -44,7 +44,7 @@ SOFTWARE.
 // location of user account files
 #define USER_DIR "user"
 
-// XXX comment
+// macro to get temperature, if value is older than 60 secs then return 'invalid'
 #define GET_TEMPERATURE(_onlwc) \
     ((((_onlwc)->last_temperature_time_us != 0) && \
       (microsec_timer() - (_onlwc)->last_temperature_time_us < 60*1000000)) \
@@ -912,7 +912,7 @@ bool cmd_edit_user(user_t * u, FILE * fp, int argc, char ** argv)
     } else if (strcmp(property, "phonenumber") == 0) {
         char * new_phonenumber = new_value;
 
-        // XXX validate phonenumber
+        // XXX validate phonenumber tbd
 
         // set phonenumber and write user file
         strcpy(u->phonenumber, new_phonenumber);
@@ -1210,7 +1210,8 @@ void display_user_wc(FILE * fp, user_t * u, int u_wc_idx, bool verbose)
         }
     }
 
-    // create temper_str  XXX comment
+    // create temper_str, 
+    // replace INVALID_TEMPERATURE (999) with either "     " or "unl"
     sprintf(temper_str, "%3d F (%d:%d)",
             curr_temper, 
             wc->temp_low_limit,
@@ -1877,10 +1878,10 @@ connect_reject:
         if (dgram_rcv.id == DGRAM_ID_TEMPERATURE) do {
             onl_wc_t           * onlwc;
 
-            INFO("recv dgram %s from %s, temp=%d\n",   // XXX debug
-                DGRAM_ID_STR(dgram_rcv.id),
-                dgram_rcv.u.temperature.wc_macaddr,
-                dgram_rcv.u.temperature.temperature);
+            DEBUG("recv dgram %s from %s, temp=%d\n",
+                  DGRAM_ID_STR(dgram_rcv.id),
+                  dgram_rcv.u.temperature.wc_macaddr,
+                  dgram_rcv.u.temperature.temperature);
 
             onlwc = find_onl_wc_from_macaddr(dgram_rcv.u.temperature.wc_macaddr);
             if (onlwc != NULL) {
@@ -1952,7 +1953,7 @@ void * temperature_monitor_thread(void * cx)
     char        alert_str[100];
     uint64_t    curr_us;
 
-    INFO("thread starting\n");  // XXX debug
+    DEBUG("thread starting\n");
 
     while (true) {
         // check every minute
@@ -1978,7 +1979,7 @@ void * temperature_monitor_thread(void * cx)
                 continue;
             }
 
-            INFO("CHECKING %s\n", wc->wc_name);  //XXX
+            DEBUG("CHECKING %s\n", wc->wc_name);
 
             // if temperature limits are not set then continue
             if (wc->temp_low_limit == INVALID_TEMPERATURE &&
