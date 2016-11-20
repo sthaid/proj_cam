@@ -7,10 +7,13 @@ echo
 echo "----------- INSTALL_ADMIN_SERVER ----------"
 
 echo
-echo SEND TAR FILE TO $user@$host
+echo SEND FILES TO $user@$host
 scp -p \
   admin_server.c p2p1.c util.c wc.h Makefile \
   $user@$host:proj_cam
+scp -p \
+  send_text_message.orig \
+  $user@$host:proj_cam/send_text_message
 
 echo
 echo STOP ADMIN_SERVER 
