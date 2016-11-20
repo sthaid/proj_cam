@@ -149,7 +149,7 @@ uint64_t gen_con_id(void);
 
 void temper_monitor_init(void);
 void * temperature_monitor_thread(void * cx);
-void send_text_message(char * phonenumber, char * subject, char * body);
+void send_text_message(char * phonenumber, char * message);
 
 // -----------------  MAIN  ---------------------------------------
 
@@ -939,7 +939,7 @@ bool cmd_text_msg_test(user_t * u, FILE * fp, int argc, char ** argv)
     }
 
     // send the test text message
-    send_text_message(u->phonenumber, "TEMPER ALERT", "this is only a test");
+    send_text_message(u->phonenumber, "TEMPER ALERT: this is only a test");
 
     // return no-logout
     return false;
@@ -1876,7 +1876,7 @@ connect_reject:
 
         // if dgram is TEMPERATURE (from webcam) then
         if (dgram_rcv.id == DGRAM_ID_TEMPERATURE) do {
-            onl_wc_t           * onlwc;
+            onl_wc_t * onlwc;
 
             DEBUG("recv dgram %s from %s, temp=%d\n",
                   DGRAM_ID_STR(dgram_rcv.id),
@@ -1885,8 +1885,8 @@ connect_reject:
 
             onlwc = find_onl_wc_from_macaddr(dgram_rcv.u.temperature.wc_macaddr);
             if (onlwc != NULL) {
-                onl_wc->temperature =  dgram_rcv.u.temperature.temperature;
-                onl_wc->last_temperature_time_us = microsec_timer();
+                onlwc->temperature =  dgram_rcv.u.temperature.temperature;
+                onlwc->last_temperature_time_us = microsec_timer();
             }
         } while (0);
     }
@@ -1950,7 +1950,7 @@ void * temperature_monitor_thread(void * cx)
     user_t    * u;
     int         curr_temper;
     int         i;
-    char        alert_str[100];
+    char        message[1000];
     uint64_t    curr_us;
 
     DEBUG("thread starting\n");
@@ -2001,24 +2001,26 @@ void * temperature_monitor_thread(void * cx)
                 continue;
             }
 
-            // if invalid temperature then send alert
+            // if temperature is invalid or out of range then
+            //   send alert
+            // endif
+            message[0] = '\0';
             curr_temper = GET_TEMPERATURE(&onl_wc[i]);
             if (curr_temper == INVALID_TEMPERATURE) {
-                sprintf(alert_str, "%s temp unavail", wc->wc_name);
-                send_text_message(u->phonenumber, "TEMPER ALERT", alert_str);
-                onlwc->last_temper_alert_send_time_us = curr_us;
+                sprintf(message, "TEMPER ALERT: %s temp unavail", wc->wc_name);
+            } else if (curr_temper < wc->temp_low_limit || curr_temper > wc->temp_high_limit) {
+                sprintf(message, "TEMPER ALERT: %s %d F", wc->wc_name, curr_temper);
             }
-
-            // if temperature not in valid range then send alert
-            if (curr_temper < wc->temp_low_limit || curr_temper > wc->temp_high_limit) {
-                sprintf(alert_str, "%s %d F", wc->wc_name, curr_temper);
-                send_text_message(u->phonenumber, "TEMPER ALERT", alert_str);
+            if (message[0] != '\0') {
+                send_text_message(u->phonenumber, message);
                 onlwc->last_temper_alert_send_time_us = curr_us;
             }
         }
     }
 }
 
+#if 0
+// this didn't work because sender was rejected by vtext.com
 void send_text_message(char * phonenumber, char * subject, char * body)
 {
     char cmd[10000];
@@ -2035,4 +2037,37 @@ void send_text_message(char * phonenumber, char * subject, char * body)
 
     system(cmd);
 }
+#endif
 
+void send_text_message(char * phonenumber, char * message)
+{
+    char cmd[1000], outfile[1000], s[1000];
+    FILE * fp;
+    int len;
+
+    // construct cmd string to execute send_text_message bash script
+    tmpnam(outfile);
+    sprintf(cmd, "./send_text_message %s \"%s\" >& %s", phonenumber, message, outfile);
+    DEBUG("cmd=%s\n", cmd);
+
+    // execute the script
+    system(cmd);
+
+    // copy the output from the script to admin_server log file
+    fp = fopen(outfile, "r");
+    if (fp == NULL) {
+        ERROR("open %s, %s\n", outfile, strerror(errno));
+        return;
+    }
+    while (fgets(s, sizeof(s), fp) != NULL) {
+        len = strlen(s);
+        if (len > 0 && s[len-1] == '\n') {
+            s[len-1] = '\0';
+        }
+        INFO("%s\n", s);
+    }
+    fclose(fp);
+
+    // delete the script outfile
+    unlink(outfile);
+}
