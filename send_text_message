@@ -1,0 +1,29 @@
+#!/bin/bash
+
+# Using nexmo demo account.
+#    https://nexmo.com
+# login: username@gmail.com   O123
+
+# Other nexmo URLs
+#   https://dashboard.nexmo.com
+#   https://dashboard.nexmo.com/getting-started-guide
+
+# This script is run by admin_server to send temperature alert text message.
+# Admin_server copies the stdout and stderr from this script to its log file.
+
+# When using the nexmo demo account all phone numbers being sent to must be
+# pre-registered with nexmo. This restriction is lifted when Nexmo Full Account
+# Features are activated.
+
+if [ $# -ne 2 ]; then
+  echo "error: invalid number of args"
+  exit
+fi
+
+phonenumber=$1
+msg=${2// /+}
+
+cmd="curl -s https://rest.nexmo.com/sms/json?api_key=XXXXXXXX&api_secret=XXXXXXXXXXXXXXXX&from=XXXXXXXXXXX&to=${phonenumber}&text=${msg}"
+
+echo $cmd
+$cmd
