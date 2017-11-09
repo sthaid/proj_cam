@@ -103,7 +103,7 @@ void * wc_svc_shell(void * cx)
     // fork and execute child 
     if ((pid = fork()) == 0) {
         char * envp[2];
-        char   env_term[200];
+        char   env_term[300];
 
         // close parents stdin, stdout, stderr
         close(0);
