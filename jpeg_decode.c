@@ -78,6 +78,9 @@ int jpeg_decode(uint32_t cxid, uint32_t jpeg_decode_mode, uint8_t * jpeg, uint32
     uint8_t                       * out = NULL;
     uint8_t                       * outp;
     uint32_t                        bytes_per_pixel;
+    int32_t                         error_line = 0;
+
+    static const bool always_init_cx = true;
 
     // preset returns to caller
     *out_buf = NULL;
@@ -101,7 +104,7 @@ int jpeg_decode(uint32_t cxid, uint32_t jpeg_decode_mode, uint8_t * jpeg, uint32
     cinfo = &cx->cinfo;
 
     // check if cx has not been initialized
-    if (!cx->initialized) {
+    if (always_init_cx || !cx->initialized) {
         // cx has not been initialized ...
 
         // use default error management, override the error_exit routine
@@ -111,24 +114,30 @@ int jpeg_decode(uint32_t cxid, uint32_t jpeg_decode_mode, uint8_t * jpeg, uint32
 
         // setjmp, for use by the error exit override
         if (setjmp(cx->err_jmpbuf)) {
+            ERROR("error_line %d\n", error_line);
             free(out);
             return -1;
         }
 
         // initialize the jpeg decompress object
+        error_line = __LINE__;
         jpeg_create_decompress(&cx->cinfo);
 
         // load default huffman tables;
         // Refer to "Abbreviated datastreams and multiple images" in libjpeg.doc
+        error_line = __LINE__;
         cinfo->ac_huff_tbl_ptrs[0] = jpeg_alloc_huff_table((j_common_ptr) &cx->cinfo);
         memcpy(cinfo->ac_huff_tbl_ptrs[0]->bits, ac_huff_tbl_0_bits, 17);
         memcpy(cinfo->ac_huff_tbl_ptrs[0]->huffval, ac_huff_tbl_0_huffval, 256);
+        error_line = __LINE__;
         cinfo->ac_huff_tbl_ptrs[1] = jpeg_alloc_huff_table((j_common_ptr) &cx->cinfo);
         memcpy(cinfo->ac_huff_tbl_ptrs[1]->bits, ac_huff_tbl_1_bits, 17);
         memcpy(cinfo->ac_huff_tbl_ptrs[1]->huffval, ac_huff_tbl_1_huffval, 256);
+        error_line = __LINE__;
         cinfo->dc_huff_tbl_ptrs[0] = jpeg_alloc_huff_table((j_common_ptr) &cx->cinfo);
         memcpy(cinfo->dc_huff_tbl_ptrs[0]->bits, dc_huff_tbl_0_bits, 17);
         memcpy(cinfo->dc_huff_tbl_ptrs[0]->huffval, dc_huff_tbl_0_huffval, 256);
+        error_line = __LINE__;
         cinfo->dc_huff_tbl_ptrs[1] = jpeg_alloc_huff_table((j_common_ptr) &cx->cinfo);
         memcpy(cinfo->dc_huff_tbl_ptrs[1]->bits, dc_huff_tbl_1_bits, 17);
         memcpy(cinfo->dc_huff_tbl_ptrs[1]->huffval, dc_huff_tbl_1_huffval, 256);
@@ -140,15 +149,18 @@ int jpeg_decode(uint32_t cxid, uint32_t jpeg_decode_mode, uint8_t * jpeg, uint32
 
         // setjmp, for use by the error exit override
         if (setjmp(cx->err_jmpbuf)) {
+            ERROR("error_line %d\n", error_line);
             free(out);
             return -1;
         }
     }
 
     // supply the jpeg buffer and size to the decoder
+    error_line = __LINE__;
     jpeg_mem_src(&cx->cinfo, jpeg, jpeg_size);
 
     // read the jpeg header, require_image==true
+    error_line = __LINE__;
     jpeg_read_header(&cx->cinfo, true);
 
     // map the jpeg_decode_mode input to the desired color space
@@ -161,6 +173,7 @@ int jpeg_decode(uint32_t cxid, uint32_t jpeg_decode_mode, uint8_t * jpeg, uint32
     }
 
     // initialize the decompression, this sets cinfo->output_width and cinfo->output_height
+    error_line = __LINE__;
     jpeg_start_decompress(&cx->cinfo);
 
     // allocate memory for the output
@@ -175,6 +188,7 @@ int jpeg_decode(uint32_t cxid, uint32_t jpeg_decode_mode, uint8_t * jpeg, uint32
     // loop over scanlines
     while (cinfo->output_scanline < cinfo->output_height) {
         // read scanline
+        error_line = __LINE__;
         jpeg_read_scanlines(&cx->cinfo, scanline, 1);
 
         // save the row data in the output buffer
@@ -196,6 +210,7 @@ int jpeg_decode(uint32_t cxid, uint32_t jpeg_decode_mode, uint8_t * jpeg, uint32
     }
 
     // complete
+    error_line = __LINE__;
     jpeg_finish_decompress(&cx->cinfo);
 
     // return success
