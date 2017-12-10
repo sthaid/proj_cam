@@ -2177,8 +2177,11 @@ int get_local_addr(struct sockaddr_in * local_addr)
 {
     struct ifaddrs *ifaddr, *ifa;
     int ret = 0;
-#ifdef DEBUG_PRINTS
     char s[100];
+#ifdef ANDROID
+    struct sockaddr_in * rmnet_addr = NULL;
+    struct sockaddr_in * wlan_addr = NULL;
+    struct sockaddr_in * other_addr = NULL;
 #endif
 
     bzero(local_addr,sizeof(struct sockaddr_in));
@@ -2188,6 +2191,33 @@ int get_local_addr(struct sockaddr_in * local_addr)
         return ret;
     }
 
+#ifdef ANDROID
+    for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+        if ((ifa->ifa_addr != NULL) &&
+            (ifa->ifa_addr->sa_family == AF_INET) &&
+            ((ifa->ifa_flags & IFF_LOOPBACK) == 0) &&
+            ((ifa->ifa_flags & IFF_POINTOPOINT) == 0))
+        {
+            INFO("found local interface: %s - %s\n",
+                 ifa->ifa_name,
+                 sock_addr_to_str(s, sizeof(s), (struct sockaddr*)ifa->ifa_addr));
+            if (strncmp(ifa->ifa_name, "rmnet", 5) == 0) {
+                rmnet_addr = (struct sockaddr_in*)ifa->ifa_addr;
+            } else if (strncmp(ifa->ifa_name, "wlan", 4) == 0) {
+                wlan_addr = (struct sockaddr_in*)ifa->ifa_addr;
+            } else {
+                other_addr = (struct sockaddr_in*)ifa->ifa_addr;
+            }
+        }
+    }
+    if (wlan_addr || other_addr || rmnet_addr) {
+        *local_addr = (wlan_addr ? *wlan_addr : other_addr ? *other_addr : *rmnet_addr);
+        INFO("using local inerface %s\n", 
+             sock_addr_to_str(s, sizeof(s), (struct sockaddr*)local_addr));
+        freeifaddrs(ifaddr);
+        return 0;
+    }
+#else
     for (ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
         if ((ifa->ifa_addr != NULL) &&
             (ifa->ifa_addr->sa_family == AF_INET) &&
@@ -2195,13 +2225,14 @@ int get_local_addr(struct sockaddr_in * local_addr)
             ((ifa->ifa_flags & IFF_POINTOPOINT) == 0))
         {
             *local_addr = *(struct sockaddr_in*)ifa->ifa_addr;
-            DEBUG("local interface: %s - %s\n", 
-                   ifa->ifa_name,
-                   sock_addr_to_str(s, sizeof(s), (struct sockaddr*)local_addr));
+            INFO("using local interface: %s - %s\n", 
+                 ifa->ifa_name,
+                 sock_addr_to_str(s, sizeof(s), (struct sockaddr*)local_addr));
             freeifaddrs(ifaddr);
             return 0;
         }
     }
+#endif
 
     freeifaddrs(ifaddr);
     errno = ENODEV;
