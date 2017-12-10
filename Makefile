@@ -64,6 +64,7 @@ p2p1.o:                    p2p1.c wc.h
 p2p2.o:                    p2p2.c wc.h
 util.o:                    util.c wc.h
 jpeg_decode.o:             jpeg_decode.c wc.h
+temper.o:                  temper.c wc.h
 
 viewer.o: viewer.c wc.h
 	$(CC) $(CFLAGS) $(SDLCFLAGS) $< -o $@
