@@ -30,6 +30,7 @@ TABLE OF CONTENTS
    . future work
 - BUILD ON LINUX
 - BUILD AND INSTALL WC_SERVER ON A RAPSBERRY PI
+- BUILD AND INSTALL WC_SERVER ON A RAPSBERRY PI - JUNE 20, 2018
 - BUILD AND INSTALL ADMIN_SERVER
 - BUILD AND INSTALL VIEWER ON ANDROID DEVICE
 
@@ -932,6 +933,7 @@ Procedure ...
   - be able to ssh to the pi account
   - check date, time, and tz are correct
   - update pi account password, if desired
+    (note the default password for user 'pi' is 'raspberry')
 
 - login to pi account and create ~/proj_cam
 
@@ -967,6 +969,78 @@ Procedure ...
 
 At this point, back on your development system, you should be able to add 
 this webcam to your account, and run the viewer. 
+
+================================================
+BUILD AND INSTALL WC_SERVER ON A RAPSBERRY PI - JUNE 20, 2018
+================================================
+
+One of my Raspberry Pi failed. The reason turned out to be the SD Card.
+
+References:
+- https://www.raspberrypi.org/documentation/installation/installing-images/
+- https://www.raspberrypi.org/downloads/
+
+Recovery Procedure: 
+- Make New SD Card
+  - purchase 32GB SD card, or any decent size
+  - download 2018-04-18-raspbian-stretch-lite.zip from https://www.raspberrypi.org/downloads/
+  - run lsblk, insert SD card, and run lsblk again to confirm which is the SD device
+  - unzip 2018-04-18-raspbian-stretch-lite.zip
+  - sudo umount  /run/media/haid/3534-6431
+  - sudo dd bs=4M if=2018-04-18-raspbian-stretch.img of=/dev/sdb conv=fsync status=progress
+
+- Basic Raspberry Pi Setup
+  - login user=pi password=raspberry
+  - get wifi working, this could probably be done via 'sudo raspi-config', however 
+    I editted /etc/wpa_supplicant/wpa_supplicant.conf
+    and added the following:
+        network={
+                ssid="haid"
+                psk="xxxxxx"
+        }
+  - sudo raspi-config, and select localization
+    - keyboard: use 'generic 101' and 'US layout'
+    - timezone
+  - systemctl enable ssh
+  - reboot
+  - verify:
+    - date and TZ
+    - ifconfig, wireless device is present with ip-address
+    - ssh into raspberry pi
+
+- Ssh Authorized keys
+  - login to raspberry pi  (pi / raspberry)
+      mkdir .ssh
+      chmod 700 .ssh
+      cd .ssh
+      vi authorized_keys
+        add my public key
+
+- Install Webcam Server on Raspberry Pi
+  - login to pi account and create ~/proj_cam
+  - sudo vi /etc/rc.local, and add the following so that the wc_server
+    will automatically start when the Raspberry Pi is rebooted
+      # Start wc_server
+      if [ -x /home/pi/proj_cam/wc_server ]
+      then
+        su pi -c "cd /home/pi/proj_cam; ./wc_server </dev/null >/dev/null 2>&1 &"
+      fi
+  - install additional development software
+    - sudo apt-get install libjpeg8-dev
+    - sudo apt-get install libreadline6-dev
+    - sudo apt-get install libusb-dev
+  - create file /etc/udev/rules.d/99-tempsensor.rules, to allow wc_server 
+    access to the temperature sensor usb device
+      SUBSYSTEMS=="usb", ACTION=="add", ATTRS{idVendor}=="0c45", ATTRS{idProduct}=="7401", MODE="666"
+  - back on development system
+    - cd ~/proj_cam
+    - bin/install_raspberry_pi <raspberry_pi_name_or_ipaddr>
+  - back on the Raspberry Pi, 
+    - reboot
+    - verify webcam server is running and the webcam active indicator is on
+    - check the wc_server.log file
+  - back on development system, run the viewer
+    - verify image and temperature are working
 
 ================================================
 BUILD AND INSTALL ADMIN_SERVER
