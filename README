@@ -991,6 +991,7 @@ Recovery Procedure:
 
 - Basic Raspberry Pi Setup
   - login user=pi password=raspberry
+  - change passwd
   - get wifi working, this could probably be done via 'sudo raspi-config', however 
     I editted /etc/wpa_supplicant/wpa_supplicant.conf
     and added the following:
