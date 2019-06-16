@@ -44,10 +44,10 @@ SOFTWARE.
 // location of user account files
 #define USER_DIR "user"
 
-// macro to get temperature, if value is older than 60 secs then return 'invalid'
+// macro to get temperature, if value is older than 600 secs then return 'invalid'
 #define GET_TEMPERATURE(_onlwc) \
     ((((_onlwc)->last_temperature_time_us != 0) && \
-      (microsec_timer() - (_onlwc)->last_temperature_time_us < 60*1000000)) \
+      (microsec_timer() - (_onlwc)->last_temperature_time_us < 600*1000000)) \
      ? (_onlwc)->temperature : INVALID_TEMPERATURE)
 
 //

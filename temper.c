@@ -71,13 +71,13 @@ int temper_init(char * wc_macaddr_arg)
 
 int temper_read(void)
 {
-    // if current temperature reading is within 10 seconds then
+    // if current temperature reading is within 60 seconds then
     //   return the current temperature
     // else
     //   return invalid
     // endif
     if (curr_temper_acquire_time != 0 &&
-        MILLISEC_TIMER - curr_temper_acquire_time < 10*1000) 
+        MILLISEC_TIMER - curr_temper_acquire_time < 60*1000) 
     {
         return curr_temper_degs_f;
     } else {
