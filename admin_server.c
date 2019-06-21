@@ -44,10 +44,10 @@ SOFTWARE.
 // location of user account files
 #define USER_DIR "user"
 
-// macro to get temperature, if value is older than 600 secs then return 'invalid'
+// macro to get temperature, if value is older than 60 secs then return 'invalid'
 #define GET_TEMPERATURE(_onlwc) \
     ((((_onlwc)->last_temperature_time_us != 0) && \
-      (microsec_timer() - (_onlwc)->last_temperature_time_us < 600*1000000)) \
+      (microsec_timer() - (_onlwc)->last_temperature_time_us < 60*1000000)) \
      ? (_onlwc)->temperature : INVALID_TEMPERATURE)
 
 //
@@ -911,16 +911,33 @@ bool cmd_edit_user(user_t * u, FILE * fp, int argc, char ** argv)
         prcl(fp, "password has been changed for user %s\n", u->user_name);
     } else if (strcmp(property, "phonenumber") == 0) {
         char * new_phonenumber = new_value;
+        int    i;
 
-        // XXX validate phonenumber tbd
+        // validate phonenumber 
+        if (strcmp(new_phonenumber, "none") == 0) {
+            // okay
+        } else {
+            for (i = 0; new_phonenumber[i]; i++) {
+                if (new_phonenumber[i] < '0' ||
+                    new_phonenumber[i] > '9')
+                {
+                    prcl(fp, "error: new_phonenumber invalid\n");
+                    return false;
+                }
+            }
+        }
 
         // set phonenumber and write user file
-        strcpy(u->phonenumber, new_phonenumber);
+        if (strcmp(new_phonenumber, "none") == 0) {
+            strcpy(u->phonenumber, "");
+        } else {
+            strcpy(u->phonenumber, new_phonenumber);
+        }
         update_user_file(u);
 
         // print
         prcl(fp, "phonenumber has been changed for user %s to %s\n", 
-             u->user_name, u->phonenumber);
+             u->user_name, u->phonenumber[0] ? u->phonenumber : "none");
     } else {
         prcl(fp, "error: invalid property '%s'\n", property);
     }
@@ -1162,7 +1179,7 @@ void display_user(FILE * fp, user_t * u, bool verbose)
 
     prcl(fp, "USER: %s  PHONE=%s\n", 
          u->user_name,
-         u->phonenumber[0] == '\0' ? "unset" : u->phonenumber);
+         u->phonenumber[0] == '\0' ? "none" : u->phonenumber);
 
     for (i = 0; i < MAX_USER_WC; i++) {
         if (u->wc[i].wc_name[0] == '\0') {
@@ -1979,8 +1996,6 @@ void * temperature_monitor_thread(void * cx)
                 continue;
             }
 
-            DEBUG("CHECKING %s\n", wc->wc_name);
-
             // if temperature limits are not set then continue
             if (wc->temp_low_limit == INVALID_TEMPERATURE &&
                 wc->temp_high_limit == INVALID_TEMPERATURE)
@@ -1994,6 +2009,12 @@ void * temperature_monitor_thread(void * cx)
                 continue;
             }
 
+            // if temperature is invalid then continue
+            curr_temper = GET_TEMPERATURE(&onl_wc[i]);
+            if (curr_temper == INVALID_TEMPERATURE) {
+                continue;
+            }
+
             // if alert sent within last 24 hours then continue
             if (onlwc->last_temper_alert_send_time_us != 0 &&
                 curr_us - onlwc->last_temper_alert_send_time_us < 24L*3600*1000000) 
@@ -2004,14 +2025,8 @@ void * temperature_monitor_thread(void * cx)
             // if temperature is invalid or out of range then
             //   send alert
             // endif
-            message[0] = '\0';
-            curr_temper = GET_TEMPERATURE(&onl_wc[i]);
-            if (curr_temper == INVALID_TEMPERATURE) {
-                sprintf(message, "TEMPER ALERT: %s temp unavail", wc->wc_name);
-            } else if (curr_temper < wc->temp_low_limit || curr_temper > wc->temp_high_limit) {
+            if (curr_temper < wc->temp_low_limit || curr_temper > wc->temp_high_limit) {
                 sprintf(message, "TEMPER ALERT: %s %d F", wc->wc_name, curr_temper);
-            }
-            if (message[0] != '\0') {
                 send_text_message(u->phonenumber, message);
                 onlwc->last_temper_alert_send_time_us = curr_us;
             }
@@ -2044,6 +2059,12 @@ void send_text_message(char * phonenumber, char * message)
     char cmd[1000], outfile[1000], s[1000];
     FILE * fp;
     int len;
+
+    // validate phonenumber is provided
+    if (phonenumber[0] == '\0' || strcmp(phonenumber, "none") == 0) {
+        ERROR("no phonenumber\n");
+        return;
+    }
 
     // construct cmd string to execute send_text_message bash script
     tmpnam(outfile);
