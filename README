@@ -31,6 +31,7 @@ TABLE OF CONTENTS
 - BUILD ON LINUX
 - BUILD AND INSTALL WC_SERVER ON A RAPSBERRY PI
 - BUILD AND INSTALL WC_SERVER ON A RAPSBERRY PI - JUNE 20, 2018
+- RASPBERRY PI TWEAKS
 - BUILD AND INSTALL ADMIN_SERVER
 - BUILD AND INSTALL VIEWER ON ANDROID DEVICE
 
@@ -1042,6 +1043,26 @@ Recovery Procedure:
     - check the wc_server.log file
   - back on development system, run the viewer
     - verify image and temperature are working
+
+================================================
+RASPBERRY PI TWEAKS
+================================================
+
+Disable WLAN Power Management - Method 1:
+- Reference: https://tosbourn.com/stop-wireless-turning-off-raspberry-pi/
+- Add 'wireless-power off' to /etc/network/interfaces; for exaple:
+    allow-hotplug wlan0
+    iface wlan0 inet manual
+    wpa-roam /etc/wpa_supplicant/wpa_supplicant.conf
+    wireless-power off
+    iface default inet dhcp
+- reboot
+- verify using iwconfig
+
+Disable WLAN Power Management - Method 2:
+- Add '/sbin/iwconfig wlan0 power off' to /etc/rc.local
+- reboot
+- verify using iwconfig
 
 ================================================
 BUILD AND INSTALL ADMIN_SERVER
