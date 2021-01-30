@@ -1064,6 +1064,16 @@ Disable WLAN Power Management - Method 2:
 - reboot
 - verify using iwconfig
 
+If the disabling or power management doesn't correct raspberry pi network
+connection problem, then try invoking this script from /etc/rc.local
+  #!/bin/bash
+  # add this to /etc/rc/local, if needed:
+  #      /home/pi/proj_cam2/ping_router </dev/null >/dev/null &
+  while [ 1 = 1 ]; do
+    ping -i 10 192.168.1.1
+    sleep 10
+  done
+
 ================================================
 BUILD AND INSTALL ADMIN_SERVER
 ================================================
