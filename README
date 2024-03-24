@@ -1046,6 +1046,7 @@ Recovery Procedure:
     - cd ~/proj_cam
     - bin/install_raspberry_pi <raspberry_pi_name_or_ipaddr>
   - back on the Raspberry Pi, 
+    - usermod -aG video pi    # first needed for OS raspios-bookworm-armhf-lite.img
     - reboot
     - verify webcam server is running and the webcam active indicator is on
     - check the wc_server.log file
