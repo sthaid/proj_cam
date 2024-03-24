@@ -988,7 +988,9 @@ Recovery Procedure:
   - run lsblk, insert SD card, and run lsblk again to confirm which is the SD device
   - unzip 2018-04-18-raspbian-stretch-lite.zip
   - sudo umount  /run/media/haid/3534-6431
+           ... something like, examples ...
   - sudo dd bs=4M if=2018-04-18-raspbian-stretch.img of=/dev/sdb conv=fsync status=progress
+  - sudo dd bs=4M if=2024-03-15-raspios-bookworm-armhf-lite.img of=/dev/sda conv=fsync status=progress
 
 - Basic Raspberry Pi Setup
   - login user=pi password=raspberry
@@ -1026,6 +1028,12 @@ Recovery Procedure:
       if [ -x /home/pi/proj_cam/wc_server ]
       then
         su pi -c "cd /home/pi/proj_cam; ./wc_server </dev/null >/dev/null 2>&1 &"
+      fi
+            OR for proj_cam2
+      # Start wc_server
+      if [ -x /home/pi/proj_cam2/wc_server ]
+      then
+        su pi -c "cd /home/pi/proj_cam2; ./wc_server </dev/null >/dev/null 2>&1 &"
       fi
   - install additional development software
     - sudo apt-get install libjpeg8-dev
